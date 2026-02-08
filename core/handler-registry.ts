@@ -355,6 +355,7 @@ export function createAllHandlers(
     setClaudeController: claudeSession.setController,
     setClaudeSessionId: claudeSession.setSessionId,
     sendClaudeMessages,
+    getDefaultModel: () => settings.getSettings().unified.defaultModel,
   });
 
   const gitHandlers = createGitHandlers({

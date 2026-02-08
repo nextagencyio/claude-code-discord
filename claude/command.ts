@@ -36,6 +36,7 @@ export interface ClaudeHandlerDeps {
   setClaudeController: (controller: AbortController | null) => void;
   setClaudeSessionId: (sessionId: string | undefined) => void;
   sendClaudeMessages: (messages: ClaudeMessage[]) => Promise<void>;
+  getDefaultModel?: () => string | undefined;
 }
 
 export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
@@ -66,6 +67,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         }]
       });
       
+      const defaultModel = deps.getDefaultModel?.();
       const result = await sendToClaudeCode(
         workDir,
         prompt,
@@ -79,7 +81,8 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
             sendClaudeMessages(claudeMessages).catch(() => {});
           }
         },
-        false // continueMode = false
+        false, // continueMode = false
+        defaultModel ? { model: defaultModel } : undefined
       );
       
       deps.setClaudeSessionId(result.sessionId);
@@ -133,6 +136,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       
       await ctx.editReply({ embeds: [embedData] });
       
+      const continueDefaultModel = deps.getDefaultModel?.();
       const result = await sendToClaudeCode(
         workDir,
         actualPrompt,
@@ -146,7 +150,8 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
             sendClaudeMessages(claudeMessages).catch(() => {});
           }
         },
-        true // continueMode = true
+        true, // continueMode = true
+        continueDefaultModel ? { model: continueDefaultModel } : undefined
       );
       
       deps.setClaudeSessionId(result.sessionId);

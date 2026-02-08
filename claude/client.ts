@@ -53,12 +53,16 @@ export async function sendToClaudeCode(
         abortController: controller,
         options: {
           cwd: workDir,
+          pathToClaudeCodeExecutable: "/Users/jcallicott/.local/bin/claude",
           permissionMode: "bypassPermissions" as const,
           verbose: true,
           outputFormat: "stream-json",
           ...(continueMode && { continue: true }),
           ...(cleanedSessionId && !continueMode && { resume: cleanedSessionId }),
           ...(modelToUse && { model: modelToUse }),
+          stderr: (data: string) => {
+            console.error(`[Claude Code stderr]: ${data}`);
+          },
         },
       };
       

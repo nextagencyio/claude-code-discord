@@ -1,12 +1,12 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:@anthropic-ai/claude-code@1.0.95": "1.0.95",
+    "npm:@anthropic-ai/claude-code@1.0.128": "1.0.128",
     "npm:discord.js@14.14.1": "14.14.1"
   },
   "npm": {
-    "@anthropic-ai/claude-code@1.0.95": {
-      "integrity": "sha512-VLwfezJ8vnNpkdUdyMORQ1JXx/C7GFd8MLiJTXXThvMTxhNEr8IhAY/bExNrtdkWx2+aipGocRLgNZrUon9HMw==",
+    "@anthropic-ai/claude-code@1.0.128": {
+      "integrity": "sha512-uUg5cFMJfeQetQzFw76Vpbro6DAXst2Lpu8aoZWRFSoQVYu5ZSAnbBoxaWmW/IgnHSqIIvtMwzCoqmcA9j9rNQ==",
       "optionalDependencies": [
         "@img/sharp-darwin-arm64",
         "@img/sharp-darwin-x64",
@@ -353,7 +353,7 @@
   },
   "workspace": {
     "dependencies": [
-      "npm:@anthropic-ai/claude-code@1.0.95",
+      "npm:@anthropic-ai/claude-code@1.0.128",
       "npm:discord.js@14.14.1"
     ]
   }
