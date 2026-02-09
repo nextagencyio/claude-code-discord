@@ -141,12 +141,12 @@ export function createClaudeSender(sender: DiscordSender) {
             ];
             
             if (oldString) {
-              const { preview: oldPreview } = truncateContent(oldString, 3, 150);
+              const { preview: oldPreview } = truncateContent(oldString, 2, 80);
               fields.push({ name: '🔴 Replacing', value: `\`\`\`\n${oldPreview}\n\`\`\``, inline: false });
             }
-            
+
             if (newString) {
-              const { preview: newPreview } = truncateContent(newString, 3, 150);
+              const { preview: newPreview } = truncateContent(newString, 2, 80);
               fields.push({ name: '🟢 With', value: `\`\`\`\n${newPreview}\n\`\`\``, inline: false });
             }
             
@@ -161,7 +161,7 @@ export function createClaudeSender(sender: DiscordSender) {
           } else {
             // All other tools use generic consistent formatting
             const inputStr = JSON.stringify(msg.metadata.input || {}, null, 2);
-            const { preview, isTruncated } = truncateContent(inputStr, 10, 800);
+            const { preview, isTruncated } = truncateContent(inputStr, 3, 200);
             
             const messageContent: MessageContent = {
               embeds: [{
@@ -209,7 +209,7 @@ export function createClaudeSender(sender: DiscordSender) {
           break;
         }
         
-        const { preview, isTruncated, totalLines } = truncateContent(cleanContent);
+        const { preview, isTruncated, totalLines } = truncateContent(cleanContent, 3, 200);
         
         const messageContent: MessageContent = {
           embeds: [{
