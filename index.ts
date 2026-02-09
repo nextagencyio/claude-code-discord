@@ -58,13 +58,64 @@ export async function createClaudeCodeBot(config: BotConfig) {
   const actualCategoryName = categoryName || repoName;
   
   // Per-channel session management: each channel has its own session and folder
+  interface QueuedMessage {
+    ctx: InteractionContext;
+    prompt: string;
+  }
   interface ChannelSession {
     controller: AbortController | null;
     sessionId: string | undefined;
     channelWorkDir: string;
+    channelName?: string;
+    messageQueue: QueuedMessage[];
   }
   const channelSessions = new Map<string, ChannelSession>();
   let activeChannelId: string | undefined;
+
+  // Session persistence file path
+  const sessionStatePath = `${workDir}/.claude-sessions.json`;
+
+  async function saveSessionState(): Promise<void> {
+    try {
+      const state: Record<string, { sessionId?: string; channelName?: string }> = {};
+      for (const [channelId, session] of channelSessions) {
+        if (session.sessionId) {
+          state[channelId] = {
+            sessionId: session.sessionId,
+            channelName: session.channelName,
+          };
+        }
+      }
+      await Deno.writeTextFile(sessionStatePath, JSON.stringify(state, null, 2));
+    } catch (error) {
+      console.warn('Could not save session state:', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function loadSessionState(): Promise<void> {
+    try {
+      const content = await Deno.readTextFile(sessionStatePath);
+      const state: Record<string, { sessionId?: string; channelName?: string }> = JSON.parse(content);
+      for (const [channelId, saved] of Object.entries(state)) {
+        if (saved.sessionId) {
+          const folderName = saved.channelName || channelId;
+          channelSessions.set(channelId, {
+            controller: null,
+            sessionId: saved.sessionId,
+            channelWorkDir: `${workDir}/${folderName}`,
+            channelName: saved.channelName,
+            messageQueue: [],
+          });
+          console.log(`Restored session for channel ${folderName}: ${saved.sessionId}`);
+        }
+      }
+    } catch {
+      // No saved state or parse error — start fresh
+    }
+  }
+
+  // Load persisted sessions from disk
+  await loadSessionState();
 
   function getChannelSession(channelId: string, channelName?: string): ChannelSession {
     if (!channelSessions.has(channelId)) {
@@ -73,6 +124,8 @@ export async function createClaudeCodeBot(config: BotConfig) {
         controller: null,
         sessionId: undefined,
         channelWorkDir: `${workDir}/${folderName}`,
+        channelName: folderName,
+        messageQueue: [],
       });
     }
     return channelSessions.get(channelId)!;
@@ -163,7 +216,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
       getController: () => activeChannelId ? getChannelSession(activeChannelId).controller : null,
       setController: (controller) => { if (activeChannelId) getChannelSession(activeChannelId).controller = controller; },
       getSessionId: () => activeChannelId ? getChannelSession(activeChannelId).sessionId : undefined,
-      setSessionId: (sessionId) => { if (activeChannelId) getChannelSession(activeChannelId).sessionId = sessionId; },
+      setSessionId: (sessionId) => { if (activeChannelId) { getChannelSession(activeChannelId).sessionId = sessionId; saveSessionState(); } },
     },
     settingsOps
   );
@@ -174,7 +227,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
     messageHistory: messageHistoryOps,
     getClaudeController: () => activeChannelId ? getChannelSession(activeChannelId).controller : null,
     getClaudeSessionId: () => activeChannelId ? getChannelSession(activeChannelId).sessionId : undefined,
-    setClaudeSessionId: (id) => { if (activeChannelId) getChannelSession(activeChannelId).sessionId = id; },
+    setClaudeSessionId: (id) => { if (activeChannelId) { getChannelSession(activeChannelId).sessionId = id; saveSessionState(); } },
     setActiveChannelId: (channelId) => { activeChannelId = channelId; },
     getClaudeWorkDir,
     crashHandler,
@@ -197,7 +250,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
   };
 
   // Message handler: relay all messages to Claude (per-channel sessions)
-  const onMessage = async (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string) => {
+  const onMessage = async (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string, imageUrls?: string[]) => {
     // Set active channel so session state closures reference the right channel
     activeChannelId = channelId;
 
@@ -210,28 +263,79 @@ export async function createClaudeCodeBot(config: BotConfig) {
       // Already exists, ignore
     }
 
-    // Check if Claude is currently running in THIS channel
+    // Build prompt with image attachments (resized to max 1500px)
+    let prompt = messageContent;
+    if (imageUrls && imageUrls.length > 0) {
+      const downloadedPaths: string[] = [];
+      for (const url of imageUrls) {
+        try {
+          const filename = `image-${Date.now()}-${Math.random().toString(36).substring(2, 8)}.png`;
+          const filePath = `${session.channelWorkDir}/${filename}`;
+          const response = await fetch(url);
+          const arrayBuffer = await response.arrayBuffer();
+          await Deno.writeFile(filePath, new Uint8Array(arrayBuffer));
+
+          // Resize image to max 1500px (largest dimension) to stay under API limits
+          try {
+            const sips = new Deno.Command("sips", {
+              args: ["--resampleLargest", "1500", filePath],
+              stdout: "null",
+              stderr: "piped",
+            });
+            const result = await sips.output();
+            if (!result.success) {
+              console.warn(`sips resize warning: ${new TextDecoder().decode(result.stderr)}`);
+            }
+          } catch {
+            console.warn(`Could not resize image (sips not available), using original`);
+          }
+
+          downloadedPaths.push(filePath);
+          console.log(`Downloaded image to: ${filePath}`);
+        } catch (error) {
+          console.error('Failed to download image:', error);
+        }
+      }
+      if (downloadedPaths.length > 0) {
+        const imageRefs = downloadedPaths.map(p => `[Attached image: ${p}]`).join('\n');
+        prompt = prompt ? `${prompt}\n\n${imageRefs}` : `Please look at this image and describe what you see.\n\n${imageRefs}`;
+      }
+    }
+
+    // If Claude is busy in this channel, queue the message
     if (session.controller && !session.controller.signal.aborted) {
+      session.messageQueue.push({ ctx, prompt });
+      const pos = session.messageQueue.length;
       await ctx.reply({
         embeds: [{
-          color: 0xffaa00,
-          title: "Claude is busy",
-          description: "A session is running in this channel. Use `/cancel` to stop it, or wait for it to finish.",
+          color: 0x9b59b6,
+          title: "Queued",
+          description: `Your message has been queued (position ${pos}). It will be processed when the current task finishes.`,
         }],
       });
       return;
     }
 
-    messageHistoryOps.addToHistory(messageContent);
+    await processMessage(channelId, session, ctx, prompt);
+  };
+
+  // Process a single message (and drain the queue after)
+  async function processMessage(channelId: string, session: ChannelSession, ctx: InteractionContext, prompt: string) {
+    messageHistoryOps.addToHistory(prompt);
 
     if (session.sessionId) {
-      // Resume existing session for this channel
-      await allHandlers.claude.onClaude(ctx, messageContent, session.sessionId);
+      await allHandlers.claude.onClaude(ctx, prompt, session.sessionId);
     } else {
-      // Start new session for this channel
-      await allHandlers.claude.onClaude(ctx, messageContent);
+      await allHandlers.claude.onClaude(ctx, prompt);
     }
-  };
+
+    // Process next queued message if any
+    const next = session.messageQueue.shift();
+    if (next) {
+      activeChannelId = channelId;
+      await processMessage(channelId, session, next.ctx, next.prompt);
+    }
+  }
 
   // Create Discord bot
   bot = await createDiscordBot(config, handlers, buttonHandlers, dependencies, crashHandler, onMessage);

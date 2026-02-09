@@ -97,7 +97,7 @@ export async function createDiscordBot(
   dependencies: BotDependencies,
   // deno-lint-ignore no-explicit-any
   crashHandler?: any,
-  onMessage?: (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string) => Promise<void>,
+  onMessage?: (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string, imageUrls?: string[]) => Promise<void>,
 ) {
   const { discordToken, applicationId, workDir, repoName, branchName, categoryName } = config;
   const actualCategoryName = categoryName || repoName;
@@ -531,7 +531,14 @@ export async function createDiscordBot(
     if (!isInCategory(message.channelId)) return;
 
     const content = message.content.trim();
-    if (!content) return;
+
+    // Extract image attachment URLs
+    const imageUrls = message.attachments
+      .filter(a => a.contentType?.startsWith('image/'))
+      .map(a => a.url);
+
+    // Skip if no text and no images
+    if (!content && imageUrls.length === 0) return;
 
     // Set active channel for output routing
     activeChannel = message.channel as TextChannel;
@@ -539,7 +546,7 @@ export async function createDiscordBot(
     if (onMessage) {
       const ctx = createMessageContext(message);
       try {
-        await onMessage(ctx, content, message.channelId, (message.channel as TextChannel).name);
+        await onMessage(ctx, content, message.channelId, (message.channel as TextChannel).name, imageUrls.length > 0 ? imageUrls : undefined);
       } catch (error) {
         console.error("Error handling message:", error);
         try {
