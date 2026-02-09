@@ -1,6 +1,6 @@
 import { splitText } from "../discord/utils.ts";
 import type { ClaudeMessage } from "./types.ts";
-import type { MessageContent, EmbedData, ComponentData } from "../discord/types.ts";
+import type { MessageContent, EmbedData } from "../discord/types.ts";
 
 // Discord sender interface for dependency injection
 export interface DiscordSender {
@@ -9,55 +9,6 @@ export interface DiscordSender {
 
 // Store full content for expand functionality
 export const expandableContent = new Map<string, string>();
-
-// Helper function to create common action buttons
-function createActionButtons(sessionId?: string): ComponentData[] {
-  const buttons: ComponentData[] = [];
-  
-  if (sessionId) {
-    buttons.push(
-      {
-        type: 'button',
-        customId: `continue:${sessionId}`,
-        label: '➡️ Continue',
-        style: 'primary'
-      },
-      {
-        type: 'button',
-        customId: `copy-session:${sessionId}`,
-        label: '📋 Session ID',
-        style: 'secondary'
-      },
-      {
-        type: 'button',
-        customId: 'jump-previous',
-        label: '⬆️ Jump to Previous',
-        style: 'secondary'
-      }
-    );
-  }
-  
-  buttons.push({
-    type: 'button',
-    customId: 'cancel-claude',
-    label: '❌ Cancel',
-    style: 'danger'
-  });
-  
-  return buttons;
-}
-
-// Helper function to create workflow buttons  
-function createWorkflowButtons(): ComponentData[] {
-  return [
-    {
-      type: 'button',
-      customId: 'workflow:git-status',
-      label: '📊 Git Status',
-      style: 'secondary'
-    }
-  ];
-}
 
 // Helper function to truncate content with smart preview
 function truncateContent(content: string, maxLines = 15, maxChars = 1000): { preview: string; isTruncated: boolean; totalLines: number } {
@@ -340,20 +291,7 @@ export function createClaudeSender(sender: DiscordSender) {
           ];
         }
         
-        // Add interactive buttons for completed sessions (but not shutdown messages)
-        const messageContent: MessageContent = { embeds: [embedData] };
-        
-        if (msg.metadata?.subtype === 'completion' && msg.metadata?.session_id) {
-          const actionButtons = createActionButtons(msg.metadata.session_id);
-          const workflowButtons = createWorkflowButtons();
-          
-          messageContent.components = [
-            { type: 'actionRow', components: actionButtons },
-            { type: 'actionRow', components: workflowButtons }
-          ];
-        }
-        
-        await sender.sendMessage(messageContent);
+        await sender.sendMessage({ embeds: [embedData] });
         break;
       }
       

@@ -1,37 +1,9 @@
 import type { ClaudeResponse, ClaudeMessage } from "./types.ts";
 import { sendToClaudeCode } from "./client.ts";
 import { convertToClaudeMessages } from "./message-converter.ts";
-import { SlashCommandBuilder } from "npm:discord.js@14.14.1";
-
-// Discord command definitions
-export const claudeCommands = [
-  new SlashCommandBuilder()
-    .setName('claude')
-    .setDescription('Send message to Claude Code')
-    .addStringOption(option =>
-      option.setName('prompt')
-        .setDescription('Prompt for Claude Code')
-        .setRequired(true))
-    .addStringOption(option =>
-      option.setName('session_id')
-        .setDescription('Session ID to continue (optional)')
-        .setRequired(false)),
-  
-  new SlashCommandBuilder()
-    .setName('continue')
-    .setDescription('Continue the previous Claude Code session')
-    .addStringOption(option =>
-      option.setName('prompt')
-        .setDescription('Prompt for Claude Code (optional)')
-        .setRequired(false)),
-  
-  new SlashCommandBuilder()
-    .setName('claude-cancel')
-    .setDescription('Cancel currently running Claude Code command'),
-];
 
 export interface ClaudeHandlerDeps {
-  workDir: string;
+  workDir: string | (() => string);
   claudeController: AbortController | null;
   setClaudeController: (controller: AbortController | null) => void;
   setClaudeSessionId: (sessionId: string | undefined) => void;
@@ -40,22 +12,25 @@ export interface ClaudeHandlerDeps {
 }
 
 export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
-  const { workDir, sendClaudeMessages } = deps;
+  const { sendClaudeMessages } = deps;
+  const resolveWorkDir = () => typeof deps.workDir === 'function' ? deps.workDir() : deps.workDir;
   
   return {
     // deno-lint-ignore no-explicit-any
     async onClaude(ctx: any, prompt: string, sessionId?: string): Promise<ClaudeResponse> {
+      const currentWorkDir = resolveWorkDir();
+
       // Cancel any existing session
       if (deps.claudeController) {
         deps.claudeController.abort();
       }
-      
+
       const controller = new AbortController();
       deps.setClaudeController(controller);
-      
+
       // Defer interaction (execute first)
       await ctx.deferReply();
-      
+
       // Send initial message
       await ctx.editReply({
         embeds: [{
@@ -66,10 +41,10 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           timestamp: true
         }]
       });
-      
+
       const defaultModel = deps.getDefaultModel?.();
       const result = await sendToClaudeCode(
-        workDir,
+        currentWorkDir,
         prompt,
         controller,
         sessionId,
@@ -84,10 +59,10 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         false, // continueMode = false
         defaultModel ? { model: defaultModel } : undefined
       );
-      
+
       deps.setClaudeSessionId(result.sessionId);
       deps.setClaudeController(null);
-      
+
       // Send completion message with interactive buttons
       if (result.sessionId) {
         await sendClaudeMessages([{
@@ -99,29 +74,31 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
             model: result.modelUsed || 'Default',
             total_cost_usd: result.cost,
             duration_ms: result.duration,
-            cwd: workDir
+            cwd: currentWorkDir
           }
         }]);
       }
-      
+
       return result;
     },
     
     // deno-lint-ignore no-explicit-any
     async onContinue(ctx: any, prompt?: string): Promise<ClaudeResponse> {
+      const currentWorkDir = resolveWorkDir();
+
       // Cancel any existing session
       if (deps.claudeController) {
         deps.claudeController.abort();
       }
-      
+
       const controller = new AbortController();
       deps.setClaudeController(controller);
-      
+
       const actualPrompt = prompt || "Please continue.";
-      
+
       // Defer interaction
       await ctx.deferReply();
-      
+
       // Send initial message
       const embedData: { color: number; title: string; description: string; timestamp: boolean; fields?: Array<{ name: string; value: string; inline: boolean }> } = {
         color: 0xffff00,
@@ -129,16 +106,16 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         description: 'Loading latest conversation and waiting for response...',
         timestamp: true
       };
-      
+
       if (prompt) {
         embedData.fields = [{ name: 'Prompt', value: `\`${prompt.substring(0, 1020)}\``, inline: false }];
       }
-      
+
       await ctx.editReply({ embeds: [embedData] });
-      
+
       const continueDefaultModel = deps.getDefaultModel?.();
       const result = await sendToClaudeCode(
-        workDir,
+        currentWorkDir,
         actualPrompt,
         controller,
         undefined, // sessionId not used
@@ -153,10 +130,10 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         true, // continueMode = true
         continueDefaultModel ? { model: continueDefaultModel } : undefined
       );
-      
+
       deps.setClaudeSessionId(result.sessionId);
       deps.setClaudeController(null);
-      
+
       // Send completion message with interactive buttons
       if (result.sessionId) {
         await sendClaudeMessages([{
@@ -168,11 +145,11 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
             model: result.modelUsed || 'Default',
             total_cost_usd: result.cost,
             duration_ms: result.duration,
-            cwd: workDir
+            cwd: currentWorkDir
           }
         }]);
       }
-      
+
       return result;
     },
     

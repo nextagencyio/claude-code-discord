@@ -13,20 +13,22 @@ import type {
 
 import type { ClaudeMessage } from "../claude/index.ts";
 
+import { SlashCommandBuilder } from "npm:discord.js@14.14.1";
+
 // Import command definitions
-import { claudeCommands, createClaudeHandlers } from "../claude/index.ts";
-import { enhancedClaudeCommands, createEnhancedClaudeHandlers } from "../claude/index.ts";
-import { additionalClaudeCommands, createAdditionalClaudeHandlers } from "../claude/additional-index.ts";
-import { advancedSettingsCommands, createAdvancedSettingsHandlers, type AdvancedBotSettings } from "../settings/index.ts";
-import { unifiedSettingsCommands, createUnifiedSettingsHandlers, type UnifiedBotSettings } from "../settings/index.ts";
-import { gitCommands, createGitHandlers } from "../git/index.ts";
-import { shellCommands, createShellHandlers } from "../shell/index.ts";
-import { utilsCommands, createUtilsHandlers } from "../util/index.ts";
-import { systemCommands, createSystemHandlers } from "../system/index.ts";
-import { helpCommand, createHelpHandlers } from "../help/index.ts";
-import { agentCommand, createAgentHandlers } from "../agent/index.ts";
-import { screenshotCommands, createScreenshotHandlers } from "../screenshot/index.ts";
-import { cleanSessionId, ClaudeSessionManager } from "../claude/index.ts";
+import { createClaudeHandlers } from "../claude/index.ts";
+import { createEnhancedClaudeHandlers } from "../claude/index.ts";
+import { createAdditionalClaudeHandlers } from "../claude/additional-index.ts";
+import { createAdvancedSettingsHandlers, type AdvancedBotSettings } from "../settings/index.ts";
+import { createUnifiedSettingsHandlers, type UnifiedBotSettings } from "../settings/index.ts";
+import { createGitHandlers } from "../git/index.ts";
+import { createShellHandlers } from "../shell/index.ts";
+import { createUtilsHandlers } from "../util/index.ts";
+import { createSystemHandlers } from "../system/index.ts";
+import { createHelpHandlers } from "../help/index.ts";
+import { createAgentHandlers } from "../agent/index.ts";
+import { createScreenshotHandlers } from "../screenshot/index.ts";
+import { cleanSessionId, ClaudeSessionManager, CLAUDE_MODELS } from "../claude/index.ts";
 
 import type { ShellManager } from "../shell/index.ts";
 import type { WorktreeBotManager } from "../git/index.ts";
@@ -135,8 +137,10 @@ export interface AllHandlers {
  * Dependencies for handler registry creation.
  */
 export interface HandlerRegistryDeps {
-  /** Working directory */
+  /** Working directory (base) */
   workDir: string;
+  /** Dynamic working directory for Claude (per-channel) */
+  getClaudeWorkDir?: () => string;
   /** Repository name */
   repoName: string;
   /** Branch name */
@@ -350,7 +354,7 @@ export function createAllHandlers(
   const currentSettings = settings.getSettings();
 
   const claudeHandlers = createClaudeHandlers({
-    workDir,
+    workDir: deps.getClaudeWorkDir || workDir,
     claudeController: claudeSession.getController(),
     setClaudeController: claudeSession.setController,
     setClaudeSessionId: claudeSession.setSessionId,
@@ -459,23 +463,39 @@ export function createAllHandlers(
 
 /**
  * Get all command definitions for bot registration.
- * 
- * @returns Array of all command definitions
+ * Simplified to only essential commands - messages are relayed directly.
  */
 export function getAllCommands() {
   return [
-    ...claudeCommands,
-    ...enhancedClaudeCommands,
-    ...additionalClaudeCommands,
-    ...advancedSettingsCommands,
-    ...unifiedSettingsCommands,
-    agentCommand,
-    ...gitCommands,
-    ...shellCommands,
-    ...utilsCommands,
-    ...systemCommands,
-    ...screenshotCommands,
-    helpCommand,
+    new SlashCommandBuilder()
+      .setName("new")
+      .setDescription("Clear the current session and start fresh"),
+
+    new SlashCommandBuilder()
+      .setName("cancel")
+      .setDescription("Cancel the currently running Claude Code session"),
+
+    new SlashCommandBuilder()
+      .setName("model")
+      .setDescription("Switch the Claude model")
+      // deno-lint-ignore no-explicit-any
+      .addStringOption((option: any) =>
+        option
+          .setName("model")
+          .setDescription("Model to use")
+          .setRequired(true)
+          .addChoices(
+            // deno-lint-ignore no-explicit-any
+            ...Object.entries(CLAUDE_MODELS).map(([key, model]: [string, any]) => ({
+              name: `${model.name}${model.recommended ? " *" : ""}`,
+              value: key,
+            }))
+          )
+      ),
+
+    new SlashCommandBuilder()
+      .setName("status")
+      .setDescription("Show current session and model info"),
   ];
 }
 

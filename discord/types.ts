@@ -36,6 +36,7 @@ export interface MessageContent {
 }
 
 export interface InteractionContext {
+  channelId?: string;
   deferReply(): Promise<void>;
   editReply(content: MessageContent): Promise<void>;
   followUp(content: MessageContent & { ephemeral?: boolean }): Promise<void>;

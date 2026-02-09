@@ -1,8 +1,8 @@
-import { 
-  Client, 
-  GatewayIntentBits, 
-  Events, 
-  ChannelType, 
+import {
+  Client,
+  GatewayIntentBits,
+  Events,
+  ChannelType,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -11,10 +11,12 @@ import {
   CommandInteraction,
   ButtonInteraction,
   TextChannel,
-  EmbedBuilder
+  EmbedBuilder,
+  Message,
 } from "npm:discord.js@14.14.1";
 
-import { sanitizeChannelName } from "./utils.ts";
+// sanitizeChannelName no longer needed - channels are user-created
+// import { sanitizeChannelName } from "./utils.ts";
 import { handlePaginationInteraction } from "./pagination.ts";
 import type { 
   BotConfig, 
@@ -89,18 +91,19 @@ function convertMessageContent(content: MessageContent): any {
 // ================================
 
 export async function createDiscordBot(
-  config: BotConfig, 
+  config: BotConfig,
   handlers: CommandHandlers,
   buttonHandlers: ButtonHandlers,
   dependencies: BotDependencies,
-  crashHandler?: any
+  // deno-lint-ignore no-explicit-any
+  crashHandler?: any,
+  onMessage?: (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string) => Promise<void>,
 ) {
   const { discordToken, applicationId, workDir, repoName, branchName, categoryName } = config;
   const actualCategoryName = categoryName || repoName;
-  
-  let myChannel: TextChannel | null = null;
-  // deno-lint-ignore no-explicit-any no-unused-vars
-  let myCategory: any = null;
+
+  let myCategoryId: string | null = null;
+  let activeChannel: TextChannel | null = null;
   
   const botSettings = dependencies.botSettings || {
     mentionEnabled: !!config.defaultMentionUserId,
@@ -108,24 +111,26 @@ export async function createDiscordBot(
   };
   
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ],
   });
   
   // Use commands from dependencies
   const commands = dependencies.commands;
   
-  // Channel management
+  // Category management - each channel in the category is an independent session
   // deno-lint-ignore no-explicit-any
-  async function ensureChannelExists(guild: any): Promise<TextChannel> {
-    const channelName = sanitizeChannelName(branchName);
-    
+  async function ensureCategoryExists(guild: any): Promise<string> {
     console.log(`Checking category "${actualCategoryName}"...`);
-    
+
     let category = guild.channels.cache.find(
       // deno-lint-ignore no-explicit-any
       (c: any) => c.type === ChannelType.GuildCategory && c.name === actualCategoryName
     );
-    
+
     if (!category) {
       console.log(`Creating category "${actualCategoryName}"...`);
       try {
@@ -139,36 +144,44 @@ export async function createDiscordBot(
         throw new Error(`Cannot create category. Please ensure the bot has "Manage Channels" permission.`);
       }
     }
-    
-    myCategory = category;
-    
-    let channel = guild.channels.cache.find(
+
+    // Create a "general" channel if no text channels exist in the category
+    const hasTextChannels = guild.channels.cache.some(
       // deno-lint-ignore no-explicit-any
-      (c: any) => c.type === ChannelType.GuildText && c.name === channelName && c.parentId === category.id
+      (c: any) => c.type === ChannelType.GuildText && c.parentId === category.id
     );
-    
-    if (!channel) {
-      console.log(`Creating channel "${channelName}"...`);
+
+    if (!hasTextChannels) {
+      console.log(`Creating "general" channel in category...`);
       try {
-        channel = await guild.channels.create({
-          name: channelName,
+        await guild.channels.create({
+          name: 'general',
           type: ChannelType.GuildText,
           parent: category.id,
-          topic: `Repository: ${repoName} | Branch: ${branchName} | Machine: ${Deno.hostname()} | Path: ${workDir}`,
+          topic: `Claude Code Bot | Working Directory: ${workDir}`,
         });
-        console.log(`Created channel "${channelName}"`);
+        console.log(`Created "general" channel`);
       } catch (error) {
         console.error(`Channel creation error: ${error}`);
         throw new Error(`Cannot create channel. Please ensure the bot has "Manage Channels" permission.`);
       }
     }
-    
-    return channel as TextChannel;
+
+    return category.id;
+  }
+
+  // Check if a channel belongs to our category
+  function isInCategory(channelId: string): boolean {
+    if (!myCategoryId) return false;
+    const channel = client.channels.cache.get(channelId);
+    if (!channel || !('parentId' in channel)) return false;
+    return (channel as TextChannel).parentId === myCategoryId;
   }
   
   // Create interaction context wrapper
   function createInteractionContext(interaction: CommandInteraction | ButtonInteraction): InteractionContext {
     return {
+      channelId: interaction.channelId,
       async deferReply(): Promise<void> {
         await interaction.deferReply();
       },
@@ -221,11 +234,50 @@ export async function createDiscordBot(
     };
   }
   
+  // Create context adapter for regular messages (non-slash-command)
+  function createMessageContext(message: Message): InteractionContext {
+    return {
+      channelId: message.channelId,
+      async deferReply(): Promise<void> {
+        await message.channel.sendTyping();
+      },
+
+      async editReply(content: MessageContent): Promise<void> {
+        await message.channel.send(convertMessageContent(content));
+      },
+
+      async followUp(content: MessageContent & { ephemeral?: boolean }): Promise<void> {
+        await message.channel.send(convertMessageContent(content));
+      },
+
+      async reply(content: MessageContent & { ephemeral?: boolean }): Promise<void> {
+        await message.reply(convertMessageContent(content));
+      },
+
+      async update(content: MessageContent): Promise<void> {
+        await message.channel.send(convertMessageContent(content));
+      },
+
+      getString(_name: string, _required?: boolean): string | null {
+        return null;
+      },
+
+      getInteger(_name: string, _required?: boolean): number | null {
+        return null;
+      },
+
+      getBoolean(_name: string, _required?: boolean): boolean | null {
+        return null;
+      }
+    };
+  }
+
   // Command handler - completely generic
   async function handleCommand(interaction: CommandInteraction) {
-    if (!myChannel || interaction.channelId !== myChannel.id) {
+    if (!isInCategory(interaction.channelId)) {
       return;
     }
+    activeChannel = interaction.channel as TextChannel;
     
     const ctx = createInteractionContext(interaction);
     const handler = handlers.get(interaction.commandName);
@@ -262,9 +314,10 @@ export async function createDiscordBot(
   
   // Button handler - completely generic
   async function handleButton(interaction: ButtonInteraction) {
-    if (!myChannel || interaction.channelId !== myChannel.id) {
+    if (!isInCategory(interaction.channelId)) {
       return;
     }
+    activeChannel = interaction.channel as TextChannel;
     
     const ctx = createInteractionContext(interaction);
     
@@ -420,7 +473,6 @@ export async function createDiscordBot(
   client.once(Events.ClientReady, async () => {
     console.log(`Bot logged in: ${client.user?.tag}`);
     console.log(`Category: ${actualCategoryName}`);
-    console.log(`Branch: ${branchName}`);
     console.log(`Working directory: ${workDir}`);
     
     const guilds = client.guilds.cache;
@@ -436,25 +488,32 @@ export async function createDiscordBot(
     }
     
     try {
-      myChannel = await ensureChannelExists(guild);
-      console.log(`Using channel "${myChannel.name}"`);
-      
-      await myChannel.send(convertMessageContent({
-        embeds: [{
-          color: 0x00ff00,
-          title: '🚀 Startup Complete',
-          description: `Claude Code bot for branch ${branchName} has started`,
-          fields: [
-            { name: 'Category', value: actualCategoryName, inline: true },
-            { name: 'Repository', value: repoName, inline: true },
-            { name: 'Branch', value: branchName, inline: true },
-            { name: 'Working Directory', value: `\`${workDir}\``, inline: false }
-          ],
-          timestamp: true
-        }]
-      }));
+      myCategoryId = await ensureCategoryExists(guild);
+      console.log(`Listening to all channels in category "${actualCategoryName}"`);
+
+      // Send startup message to the first text channel in the category
+      const firstChannel = guild.channels.cache.find(
+        // deno-lint-ignore no-explicit-any
+        (c: any) => c.type === ChannelType.GuildText && c.parentId === myCategoryId
+      );
+      if (firstChannel) {
+        activeChannel = firstChannel as TextChannel;
+        await (firstChannel as TextChannel).send(convertMessageContent({
+          embeds: [{
+            color: 0x00ff00,
+            title: 'Startup Complete',
+            description: `Claude Code bot is ready. Each channel in this category is an independent session.`,
+            fields: [
+              { name: 'Category', value: actualCategoryName, inline: true },
+              { name: 'Working Directory', value: `\`${workDir}\``, inline: false },
+              { name: 'Usage', value: 'Type a message in any channel to start a Claude session. Use `/new` to reset a channel\'s session.', inline: false }
+            ],
+            timestamp: true
+          }]
+        }));
+      }
     } catch (error) {
-      console.error('Channel creation/retrieval error:', error);
+      console.error('Category creation/retrieval error:', error);
     }
   });
   
@@ -465,7 +524,39 @@ export async function createDiscordBot(
       await handleButton(interaction as ButtonInteraction);
     }
   });
-  
+
+  // Message handler - relay all messages to Claude (any channel in category)
+  client.on(Events.MessageCreate, async (message: Message) => {
+    if (message.author.bot) return;
+    if (!isInCategory(message.channelId)) return;
+
+    const content = message.content.trim();
+    if (!content) return;
+
+    // Set active channel for output routing
+    activeChannel = message.channel as TextChannel;
+
+    if (onMessage) {
+      const ctx = createMessageContext(message);
+      try {
+        await onMessage(ctx, content, message.channelId, (message.channel as TextChannel).name);
+      } catch (error) {
+        console.error("Error handling message:", error);
+        try {
+          await message.reply({
+            embeds: [{
+              color: 0xff0000,
+              title: "Error",
+              description: error instanceof Error ? error.message : "Unknown error",
+            }],
+          });
+        } catch {
+          // Ignore errors when sending error messages
+        }
+      }
+    }
+  });
+
   // Login
   await client.login(discordToken);
   
@@ -473,7 +564,13 @@ export async function createDiscordBot(
   return {
     client,
     getChannel() {
-      return myChannel;
+      return activeChannel;
+    },
+    setActiveChannel(channel: TextChannel) {
+      activeChannel = channel;
+    },
+    getCategoryId() {
+      return myCategoryId;
     },
     updateBotSettings(settings: { mentionEnabled: boolean; mentionUserId: string | null }) {
       botSettings.mentionEnabled = settings.mentionEnabled;

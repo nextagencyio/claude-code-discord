@@ -9,26 +9,18 @@
  * @module index
  */
 
-import { 
-  createDiscordBot, 
+import {
+  createDiscordBot,
   type BotConfig,
   type InteractionContext,
   type CommandHandlers,
   type ButtonHandlers,
-  type BotDependencies
+  type BotDependencies,
 } from "./discord/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
 import { createClaudeSender, expandableContent, type DiscordSender, type ClaudeMessage } from "./claude/index.ts";
-import { claudeCommands, enhancedClaudeCommands } from "./claude/index.ts";
-import { additionalClaudeCommands } from "./claude/additional-index.ts";
-import { advancedSettingsCommands, DEFAULT_SETTINGS, unifiedSettingsCommands, UNIFIED_DEFAULT_SETTINGS } from "./settings/index.ts";
-import { gitCommands } from "./git/index.ts";
-import { shellCommands } from "./shell/index.ts";
-import { utilsCommands } from "./util/index.ts";
-import { systemCommands } from "./system/index.ts";
-import { helpCommand } from "./help/index.ts";
-import { agentCommand } from "./agent/index.ts";
+import { DEFAULT_SETTINGS, UNIFIED_DEFAULT_SETTINGS } from "./settings/index.ts";
 import { cleanupPaginationStates } from "./discord/index.ts";
 
 // Core modules - now handle most of the heavy lifting
@@ -65,9 +57,35 @@ export async function createClaudeCodeBot(config: BotConfig) {
   // Determine category name (use repository name if not specified)
   const actualCategoryName = categoryName || repoName;
   
-  // Claude Code session management (closures needed for handler state)
-  let claudeController: AbortController | null = null;
-  let claudeSessionId: string | undefined;
+  // Per-channel session management: each channel has its own session and folder
+  interface ChannelSession {
+    controller: AbortController | null;
+    sessionId: string | undefined;
+    channelWorkDir: string;
+  }
+  const channelSessions = new Map<string, ChannelSession>();
+  let activeChannelId: string | undefined;
+
+  function getChannelSession(channelId: string, channelName?: string): ChannelSession {
+    if (!channelSessions.has(channelId)) {
+      const folderName = channelName || channelId;
+      channelSessions.set(channelId, {
+        controller: null,
+        sessionId: undefined,
+        channelWorkDir: `${workDir}/${folderName}`,
+      });
+    }
+    return channelSessions.get(channelId)!;
+  }
+
+  // Dynamic workDir getter for Claude handlers — returns the active channel's folder
+  function getClaudeWorkDir(): string {
+    if (activeChannelId) {
+      const session = channelSessions.get(activeChannelId);
+      if (session) return session.channelWorkDir;
+    }
+    return workDir;
+  }
   
   // Message history for navigation
   const messageHistoryOps: MessageHistoryOps = createMessageHistory(50);
@@ -120,6 +138,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
   const allHandlers: AllHandlers = createAllHandlers(
     {
       workDir,
+      getClaudeWorkDir,
       repoName,
       branchName,
       categoryName: actualCategoryName,
@@ -141,10 +160,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
       },
     },
     {
-      getController: () => claudeController,
-      setController: (controller) => { claudeController = controller; },
-      getSessionId: () => claudeSessionId,
-      setSessionId: (sessionId) => { claudeSessionId = sessionId; },
+      getController: () => activeChannelId ? getChannelSession(activeChannelId).controller : null,
+      setController: (controller) => { if (activeChannelId) getChannelSession(activeChannelId).controller = controller; },
+      getSessionId: () => activeChannelId ? getChannelSession(activeChannelId).sessionId : undefined,
+      setSessionId: (sessionId) => { if (activeChannelId) getChannelSession(activeChannelId).sessionId = sessionId; },
     },
     settingsOps
   );
@@ -153,22 +172,20 @@ export async function createClaudeCodeBot(config: BotConfig) {
   const handlers: CommandHandlers = createAllCommandHandlers({
     handlers: allHandlers,
     messageHistory: messageHistoryOps,
-    getClaudeController: () => claudeController,
-    getClaudeSessionId: () => claudeSessionId,
+    getClaudeController: () => activeChannelId ? getChannelSession(activeChannelId).controller : null,
+    getClaudeSessionId: () => activeChannelId ? getChannelSession(activeChannelId).sessionId : undefined,
+    setClaudeSessionId: (id) => { if (activeChannelId) getChannelSession(activeChannelId).sessionId = id; },
+    setActiveChannelId: (channelId) => { activeChannelId = channelId; },
+    getClaudeWorkDir,
     crashHandler,
     healthMonitor,
     botSettings,
     cleanupInterval,
   });
 
-  // Create button handlers using the button handler factory
+  // Create button handlers (expand/collapse for truncated content)
   const buttonHandlers: ButtonHandlers = createButtonHandlers(
-    {
-      messageHistory: messageHistoryOps,
-      handlers: allHandlers,
-      getClaudeSessionId: () => claudeSessionId,
-      sendClaudeMessages,
-    },
+    {},
     expandableContent
   );
 
@@ -179,8 +196,45 @@ export async function createClaudeCodeBot(config: BotConfig) {
     botSettings
   };
 
+  // Message handler: relay all messages to Claude (per-channel sessions)
+  const onMessage = async (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string) => {
+    // Set active channel so session state closures reference the right channel
+    activeChannelId = channelId;
+
+    const session = getChannelSession(channelId, channelName);
+
+    // Ensure the channel's folder exists
+    try {
+      await Deno.mkdir(session.channelWorkDir, { recursive: true });
+    } catch {
+      // Already exists, ignore
+    }
+
+    // Check if Claude is currently running in THIS channel
+    if (session.controller && !session.controller.signal.aborted) {
+      await ctx.reply({
+        embeds: [{
+          color: 0xffaa00,
+          title: "Claude is busy",
+          description: "A session is running in this channel. Use `/cancel` to stop it, or wait for it to finish.",
+        }],
+      });
+      return;
+    }
+
+    messageHistoryOps.addToHistory(messageContent);
+
+    if (session.sessionId) {
+      // Resume existing session for this channel
+      await allHandlers.claude.onClaude(ctx, messageContent, session.sessionId);
+    } else {
+      // Start new session for this channel
+      await allHandlers.claude.onClaude(ctx, messageContent);
+    }
+  };
+
   // Create Discord bot
-  bot = await createDiscordBot(config, handlers, buttonHandlers, dependencies, crashHandler);
+  bot = await createDiscordBot(config, handlers, buttonHandlers, dependencies, crashHandler, onMessage);
   
   // Create Discord sender for Claude messages
   claudeSender = createClaudeSender(createDiscordSenderAdapter(bot));
@@ -189,7 +243,18 @@ export async function createClaudeCodeBot(config: BotConfig) {
   setupSignalHandlers({
     managers,
     allHandlers,
-    getClaudeController: () => claudeController,
+    getClaudeController: () => {
+      // Return any active controller from any channel
+      for (const session of channelSessions.values()) {
+        if (session.controller && !session.controller.signal.aborted) return session.controller;
+      }
+      return null;
+    },
+    abortAllSessions: () => {
+      for (const session of channelSessions.values()) {
+        if (session.controller) session.controller.abort();
+      }
+    },
     claudeSender,
     actualCategoryName,
     repoName,
@@ -271,6 +336,7 @@ function setupSignalHandlers(ctx: {
   managers: BotManagers;
   allHandlers: AllHandlers;
   getClaudeController: () => AbortController | null;
+  abortAllSessions?: () => void;
   claudeSender: ((messages: ClaudeMessage[]) => Promise<void>) | null;
   actualCategoryName: string;
   repoName: string;
@@ -279,7 +345,7 @@ function setupSignalHandlers(ctx: {
   // deno-lint-ignore no-explicit-any
   bot: any;
 }) {
-  const { managers, allHandlers, getClaudeController, claudeSender, actualCategoryName, repoName, branchName, cleanupInterval, bot } = ctx;
+  const { managers, allHandlers, getClaudeController, abortAllSessions, claudeSender, actualCategoryName, repoName, branchName, cleanupInterval, bot } = ctx;
   const { crashHandler, healthMonitor } = managers;
   const { shell: shellHandlers, git: gitHandlers } = allHandlers;
   
@@ -291,10 +357,14 @@ function setupSignalHandlers(ctx: {
       shellHandlers.killAllProcesses();
       gitHandlers.killAllWorktreeBots();
       
-      // Cancel Claude Code session
-      const claudeController = getClaudeController();
-      if (claudeController) {
-        claudeController.abort();
+      // Cancel all Claude Code sessions
+      if (abortAllSessions) {
+        abortAllSessions();
+      } else {
+        const claudeController = getClaudeController();
+        if (claudeController) {
+          claudeController.abort();
+        }
       }
       
       // Send shutdown message

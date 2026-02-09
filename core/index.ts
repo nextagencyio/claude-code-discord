@@ -100,17 +100,5 @@ export {
 // Command wrappers
 export {
   type CommandWrapperDeps,
-  createSystemCommandHandlers,
-  createParameterizedSystemHandlers,
-  createClaudeCommandHandlers,
-  createSettingsCommandHandlers,
   createAllCommandHandlers,
 } from "./command-wrappers.ts";
-
-// Git and Shell handlers
-export {
-  type GitShellHandlerDeps,
-  createGitCommandHandlers,
-  createShellCommandHandlers,
-  createUtilityCommandHandlers,
-} from "./git-shell-handlers.ts";
