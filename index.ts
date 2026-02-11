@@ -277,17 +277,15 @@ export async function createClaudeCodeBot(config: BotConfig) {
 
           // Resize image to max 1500px (largest dimension) to stay under API limits
           try {
-            const sips = new Deno.Command("sips", {
-              args: ["--resampleLargest", "1500", filePath],
-              stdout: "null",
-              stderr: "piped",
-            });
-            const result = await sips.output();
+            const cmd = Deno.build.os === "darwin"
+              ? new Deno.Command("sips", { args: ["--resampleLargest", "1500", filePath], stdout: "null", stderr: "piped" })
+              : new Deno.Command("convert", { args: [filePath, "-resize", "1500x1500>", filePath], stdout: "null", stderr: "piped" });
+            const result = await cmd.output();
             if (!result.success) {
-              console.warn(`sips resize warning: ${new TextDecoder().decode(result.stderr)}`);
+              console.warn(`Image resize warning: ${new TextDecoder().decode(result.stderr)}`);
             }
           } catch {
-            console.warn(`Could not resize image (sips not available), using original`);
+            console.warn(`Could not resize image (install ImageMagick on Linux), using original`);
           }
 
           downloadedPaths.push(filePath);
