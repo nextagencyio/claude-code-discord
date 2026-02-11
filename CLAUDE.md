@@ -15,7 +15,6 @@ Discord bot that provides a conversational interface to Claude Code. Users type 
 ## Important Rules
 
 - **NEVER start the bot** (`deno task start`) from within a Claude Code session — this would create a recursive loop since the bot itself runs Claude Code.
-- **NEVER modify or read `.env`** — it contains secrets (DISCORD_TOKEN, etc.)
 - Always run `deno check index.ts` after making changes to verify types.
 
 ## Architecture
