@@ -53,7 +53,7 @@ export async function sendToClaudeCode(
         abortController: controller,
         options: {
           cwd: workDir,
-          pathToClaudeCodeExecutable: "/Users/jcallicott/.local/bin/claude",
+          pathToClaudeCodeExecutable: Deno.env.get("CLAUDE_PATH") || "claude",
           permissionMode: "bypassPermissions" as const,
           verbose: true,
           outputFormat: "stream-json",
