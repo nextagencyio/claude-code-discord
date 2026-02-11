@@ -66,8 +66,10 @@ Each channel operates independently with its own:
 ### Image Support
 Attach images to your Discord messages and Claude will see them. Images are:
 - Downloaded to the channel's working directory
-- Automatically resized to max 1500px to stay within API limits
+- Automatically resized to max 1500px to stay within API limits (uses `sips` on macOS, `convert` on Linux)
 - Referenced in the prompt so Claude can read them
+
+> **Linux:** Install ImageMagick for image resizing: `sudo apt install imagemagick`
 
 ### Message Queuing
 If you send a message while Claude is still processing, it gets queued automatically. Once the current task finishes, queued messages are processed in order.
