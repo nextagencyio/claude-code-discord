@@ -69,6 +69,7 @@ export async function sendToClaudeCode(
   cost?: number;
   duration?: number;
   modelUsed?: string;
+  stderrOutput?: string;
 }> {
   const messages: SDKMessage[] = [];
   let fullResponse = "";
@@ -78,12 +79,15 @@ export async function sendToClaudeCode(
   // Clean up session ID
   const cleanedSessionId = sessionId ? cleanSessionId(sessionId) : undefined;
   
+  // Captured stderr output for diagnostics
+  const stderrLines: string[] = [];
+
   // Wrap with comprehensive error handling
   const executeWithErrorHandling = async (overrideModel?: string) => {
     try {
       // Determine which model to use
       const modelToUse = overrideModel || modelOptions?.model;
-      
+
       const queryOptions = {
         prompt,
         abortController: controller,
@@ -97,11 +101,12 @@ export async function sendToClaudeCode(
           ...(cleanedSessionId && !continueMode && { resume: cleanedSessionId }),
           ...(modelToUse && { model: modelToUse }),
           stderr: (data: string) => {
+            stderrLines.push(data);
             console.error(`[Claude Code stderr]: ${data}`);
           },
         },
       };
-      
+
       console.log(`Claude Code: Running with ${modelToUse || 'default'} model in cwd: ${workDir}`);
       if (continueMode) {
         console.log(`Continue mode: Reading latest conversation in directory`);
@@ -117,9 +122,26 @@ export async function sendToClaudeCode(
       let currentSessionId: string | undefined;
       let messageCount = 0;
 
+      // Startup timeout: abort if no first message within 30 seconds
+      let startupTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      if (!controller.signal.aborted) {
+        startupTimeoutId = setTimeout(() => {
+          if (messageCount === 0 && !controller.signal.aborted) {
+            const stderrSummary = stderrLines.join('\n').substring(0, 500);
+            console.error(`Claude Code: TIMEOUT — no messages received after 30s. stderr: ${stderrSummary}`);
+            controller.abort();
+          }
+        }, 30000);
+      }
+
       for await (const message of iterator) {
         messageCount++;
         if (messageCount === 1) {
+          // Clear the startup timeout once we get a first message
+          if (startupTimeoutId) {
+            clearTimeout(startupTimeoutId);
+            startupTimeoutId = null;
+          }
           console.log(`Claude Code: First message received (type: ${message.type})`);
         }
         // Check AbortSignal to stop iteration
@@ -127,14 +149,14 @@ export async function sendToClaudeCode(
           console.log(`Claude Code: Abort signal detected, stopping iteration`);
           break;
         }
-        
+
         currentMessages.push(message);
-        
+
         // For JSON streams, call dedicated callback
         if (onStreamJson) {
           onStreamJson(message);
         }
-        
+
         // For text messages, send chunks
         // Skip for JSON stream output as it's handled by onStreamJson
         if (message.type === 'assistant' && message.message.content && !onStreamJson) {
@@ -144,19 +166,24 @@ export async function sendToClaudeCode(
             // deno-lint-ignore no-explicit-any
             .map((c: any) => c.text)
             .join('');
-          
+
           if (textContent && onChunk) {
             onChunk(textContent);
           }
           currentResponse = textContent;
         }
-        
+
         // Save session information
         if ('session_id' in message && message.session_id) {
           currentSessionId = message.session_id;
         }
       }
-      
+
+      // Clear timeout if still pending
+      if (startupTimeoutId) {
+        clearTimeout(startupTimeoutId);
+      }
+
       console.log(`Claude Code: Iterator finished. Total messages: ${messageCount}, sessionId: ${currentSessionId || 'none'}`);
 
       return {
@@ -164,13 +191,14 @@ export async function sendToClaudeCode(
         response: currentResponse,
         sessionId: currentSessionId,
         aborted: controller.signal.aborted,
-        modelUsed: modelToUse || "Default"
+        modelUsed: modelToUse || "Default",
+        stderrOutput: stderrLines.join('\n'),
       };
     // deno-lint-ignore no-explicit-any
     } catch (error: any) {
       // Properly handle process exit code 143 (SIGTERM) and AbortError
-      if (error.name === 'AbortError' || 
-          controller.signal.aborted || 
+      if (error.name === 'AbortError' ||
+          controller.signal.aborted ||
           (error.message && error.message.includes('exited with code 143'))) {
         console.log(`Claude Code: Process terminated by abort signal`);
         return {
@@ -178,9 +206,12 @@ export async function sendToClaudeCode(
           response: "",
           sessionId: undefined,
           aborted: true,
-          modelUsed: "Default"
+          modelUsed: "Default",
+          stderrOutput: stderrLines.join('\n'),
         };
       }
+      // Attach stderr to the error for the caller
+      error.stderrOutput = stderrLines.join('\n');
       throw error;
     }
   };
@@ -190,23 +221,24 @@ export async function sendToClaudeCode(
     const result = await executeWithErrorHandling();
     
     if (result.aborted) {
-      return { response: "Request was cancelled", modelUsed: result.modelUsed };
+      return { response: "Request was cancelled", modelUsed: result.modelUsed, stderrOutput: result.stderrOutput };
     }
-    
+
     messages.push(...result.messages);
     fullResponse = result.response;
     resultSessionId = result.sessionId;
     modelUsed = result.modelUsed;
-    
+
     // Get information from the last message
     const lastMessage = messages[messages.length - 1];
-    
+
     return {
       response: fullResponse || "No response received",
       sessionId: resultSessionId,
       cost: 'total_cost_usd' in lastMessage ? lastMessage.total_cost_usd : undefined,
       duration: 'duration_ms' in lastMessage ? lastMessage.duration_ms : undefined,
-      modelUsed
+      modelUsed,
+      stderrOutput: result.stderrOutput,
     };
   // deno-lint-ignore no-explicit-any
   } catch (error: any) {

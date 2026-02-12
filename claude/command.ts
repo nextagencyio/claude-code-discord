@@ -88,25 +88,41 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           }]);
         } else if (streamMessageCount === 0) {
           // No session ID and no stream messages — something went wrong silently
+          const stderrPreview = result.stderrOutput ? result.stderrOutput.substring(0, 800) : 'none';
+          const fields = [
+            { name: 'Working Directory', value: `\`${currentWorkDir}\``, inline: false },
+            { name: 'Model', value: result.modelUsed || 'Default', inline: true },
+            { name: 'Response', value: `\`${(result.response || 'empty').substring(0, 200)}\``, inline: false },
+          ];
+          if (stderrPreview !== 'none') {
+            fields.push({ name: 'stderr', value: `\`\`\`\n${stderrPreview}\n\`\`\``, inline: false });
+          }
           await ctx.editReply({
             embeds: [{
               color: 0xff0000,
               title: 'Claude Code - No Response',
-              description: `Claude Code returned without producing any output.\nResponse: \`${(result.response || 'empty').substring(0, 500)}\``,
-              fields: [
-                { name: 'Working Directory', value: `\`${currentWorkDir}\``, inline: false },
-                { name: 'Model', value: result.modelUsed || 'Default', inline: true },
-              ],
+              description: 'Claude Code returned without producing any output. Check that the CLI is installed and authenticated on the server.',
+              fields,
               timestamp: true
             }]
           });
         }
 
         return result;
-      } catch (error) {
+      // deno-lint-ignore no-explicit-any
+      } catch (error: any) {
         deps.setClaudeController(null);
         const errorMsg = error instanceof Error ? error.message : String(error);
+        const stderrOutput = error.stderrOutput || '';
         console.error('[onClaude] sendToClaudeCode error:', errorMsg);
+
+        const fields = [
+          { name: 'Working Directory', value: `\`${currentWorkDir}\``, inline: false },
+          { name: 'Stream Messages Received', value: `${streamMessageCount}`, inline: true },
+        ];
+        if (stderrOutput) {
+          fields.push({ name: 'stderr', value: `\`\`\`\n${stderrOutput.substring(0, 800)}\n\`\`\``, inline: false });
+        }
 
         // Post error directly to Discord via ctx (which always works)
         await ctx.editReply({
@@ -114,10 +130,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
             color: 0xff0000,
             title: 'Claude Code Error',
             description: `\`\`\`\n${errorMsg.substring(0, 1500)}\n\`\`\``,
-            fields: [
-              { name: 'Working Directory', value: `\`${currentWorkDir}\``, inline: false },
-              { name: 'Stream Messages Received', value: `${streamMessageCount}`, inline: true },
-            ],
+            fields,
             timestamp: true
           }]
         });
