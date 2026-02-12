@@ -83,10 +83,11 @@ export async function sendToClaudeCode(
   const stderrLines: string[] = [];
 
   // Wrap with comprehensive error handling
-  const executeWithErrorHandling = async (overrideModel?: string) => {
+  const executeWithErrorHandling = async (overrideModel?: string, skipResume?: boolean) => {
     try {
       // Determine which model to use
       const modelToUse = overrideModel || modelOptions?.model;
+      const shouldResume = cleanedSessionId && !continueMode && !skipResume;
 
       const queryOptions = {
         prompt,
@@ -99,7 +100,7 @@ export async function sendToClaudeCode(
           verbose: true,
           outputFormat: "stream-json",
           ...(continueMode && { continue: true }),
-          ...(cleanedSessionId && !continueMode && { resume: cleanedSessionId }),
+          ...(shouldResume && { resume: cleanedSessionId }),
           ...(modelToUse && { model: modelToUse }),
           stderr: (data: string) => {
             stderrLines.push(data);
@@ -111,8 +112,10 @@ export async function sendToClaudeCode(
       console.log(`Claude Code: Running with ${modelToUse || 'default'} model in cwd: ${workDir}`);
       if (continueMode) {
         console.log(`Continue mode: Reading latest conversation in directory`);
-      } else if (cleanedSessionId) {
+      } else if (shouldResume) {
         console.log(`Session resuming with ID: ${cleanedSessionId}`);
+      } else if (cleanedSessionId && skipResume) {
+        console.log(`Skipping session resume (previous attempt failed), starting fresh`);
       }
 
       console.log(`Claude Code: Creating query iterator...`);
@@ -243,12 +246,13 @@ export async function sendToClaudeCode(
     };
   // deno-lint-ignore no-explicit-any
   } catch (error: any) {
-    // For exit code 1 errors (rate limit), retry with Sonnet 4
+    // For exit code 1 errors, retry without session resume (may be a bad session)
+    // and fall back to Sonnet 4 as the model
     if (error.message && (error.message.includes('exit code 1') || error.message.includes('exited with code 1'))) {
-      console.log("Rate limit detected, retrying with Sonnet 4...");
-      
+      console.log("Exit code 1 detected — retrying with Sonnet 4 (without session resume)...");
+
       try {
-        const retryResult = await executeWithErrorHandling("claude-sonnet-4-20250514");
+        const retryResult = await executeWithErrorHandling("claude-sonnet-4-20250514", true);
         
         if (retryResult.aborted) {
           return { response: "Request was cancelled", modelUsed: retryResult.modelUsed };

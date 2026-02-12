@@ -65,9 +65,19 @@ export function convertToClaudeMessages(jsonData: any): ClaudeMessage[] {
         .filter((c: any) => c.type === 'tool_result');
       
       for (const result of toolResults) {
+        // result.content can be a string, an array of content blocks, or missing
+        let resultText: string;
+        if (typeof result.content === 'string') {
+          resultText = result.content;
+        } else if (Array.isArray(result.content)) {
+          // deno-lint-ignore no-explicit-any
+          resultText = result.content.map((c: any) => c.text || JSON.stringify(c)).join('\n');
+        } else {
+          resultText = JSON.stringify(result, null, 2);
+        }
         messages.push({
           type: 'tool_result',
-          content: result.content || JSON.stringify(result, null, 2)
+          content: resultText
         });
       }
       
