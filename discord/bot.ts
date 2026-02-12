@@ -97,7 +97,7 @@ export async function createDiscordBot(
   dependencies: BotDependencies,
   // deno-lint-ignore no-explicit-any
   crashHandler?: any,
-  onMessage?: (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string, imageUrls?: string[]) => Promise<void>,
+  onMessage?: (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string, imageUrls?: string[], fileAttachments?: Array<{ url: string; name: string }>) => Promise<void>,
 ) {
   const { discordToken, applicationId, workDir, repoName, branchName, categoryName } = config;
   const actualCategoryName = categoryName || repoName;
@@ -532,13 +532,16 @@ export async function createDiscordBot(
 
     const content = message.content.trim();
 
-    // Extract image attachment URLs
+    // Extract attachment URLs (images vs other files)
     const imageUrls = message.attachments
       .filter(a => a.contentType?.startsWith('image/'))
       .map(a => a.url);
+    const fileAttachments = message.attachments
+      .filter(a => !a.contentType?.startsWith('image/'))
+      .map(a => ({ url: a.url, name: a.name }));
 
-    // Skip if no text and no images
-    if (!content && imageUrls.length === 0) return;
+    // Skip if no text and no attachments
+    if (!content && imageUrls.length === 0 && fileAttachments.length === 0) return;
 
     // Set active channel for output routing
     activeChannel = message.channel as TextChannel;
@@ -546,7 +549,7 @@ export async function createDiscordBot(
     if (onMessage) {
       const ctx = createMessageContext(message);
       try {
-        await onMessage(ctx, content, message.channelId, (message.channel as TextChannel).name, imageUrls.length > 0 ? imageUrls : undefined);
+        await onMessage(ctx, content, message.channelId, (message.channel as TextChannel).name, imageUrls.length > 0 ? imageUrls : undefined, fileAttachments.length > 0 ? fileAttachments : undefined);
       } catch (error) {
         console.error("Error handling message:", error);
         try {

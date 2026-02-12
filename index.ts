@@ -250,7 +250,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
   };
 
   // Message handler: relay all messages to Claude (per-channel sessions)
-  const onMessage = async (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string, imageUrls?: string[]) => {
+  const onMessage = async (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string, imageUrls?: string[], fileAttachments?: Array<{ url: string; name: string }>) => {
     // Set active channel so session state closures reference the right channel
     activeChannelId = channelId;
 
@@ -297,6 +297,27 @@ export async function createClaudeCodeBot(config: BotConfig) {
       if (downloadedPaths.length > 0) {
         const imageRefs = downloadedPaths.map(p => `[Attached image: ${p}]`).join('\n');
         prompt = prompt ? `${prompt}\n\n${imageRefs}` : `Please look at this image and describe what you see.\n\n${imageRefs}`;
+      }
+    }
+
+    // Download non-image file attachments to the channel's working directory
+    if (fileAttachments && fileAttachments.length > 0) {
+      const savedFiles: string[] = [];
+      for (const file of fileAttachments) {
+        try {
+          const filePath = `${session.channelWorkDir}/${file.name}`;
+          const response = await fetch(file.url);
+          const arrayBuffer = await response.arrayBuffer();
+          await Deno.writeFile(filePath, new Uint8Array(arrayBuffer));
+          savedFiles.push(filePath);
+          console.log(`Downloaded file to: ${filePath}`);
+        } catch (error) {
+          console.error('Failed to download file:', error);
+        }
+      }
+      if (savedFiles.length > 0) {
+        const fileRefs = savedFiles.map(p => `[Attached file: ${p}]`).join('\n');
+        prompt = prompt ? `${prompt}\n\n${fileRefs}` : `I've attached some files for you to work with.\n\n${fileRefs}`;
       }
     }
 
