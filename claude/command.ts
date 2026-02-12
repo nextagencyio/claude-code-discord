@@ -47,27 +47,53 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       const defaultModel = deps.getDefaultModel?.();
       let streamMessageCount = 0;
 
+      // Race the SDK call against a hard 30-second timeout
+      // (controller.abort() alone may not break a blocking iterator)
+      const STARTUP_TIMEOUT_MS = 30000;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          controller.abort();
+          reject(new Error(
+            `TIMEOUT: Claude CLI produced no output after ${STARTUP_TIMEOUT_MS / 1000}s. ` +
+            `The CLI may not be installed, not authenticated, or hanging. ` +
+            `cwd=${currentWorkDir}`
+          ));
+        }, STARTUP_TIMEOUT_MS);
+      });
+
+      const queryPromise = sendToClaudeCode(
+        currentWorkDir,
+        prompt,
+        controller,
+        sessionId,
+        undefined, // onChunk callback not used
+        (jsonData) => {
+          streamMessageCount++;
+          // First message received — cancel the timeout
+          if (streamMessageCount === 1 && timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = undefined;
+          }
+          // Process JSON stream data and send to Discord
+          const claudeMessages = convertToClaudeMessages(jsonData);
+          if (claudeMessages.length > 0) {
+            send(claudeMessages).catch((err) => {
+              console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
+            });
+          }
+        },
+        false, // continueMode = false
+        defaultModel ? { model: defaultModel } : undefined,
+        deps.workspaceRootDir
+      );
+
       try {
-        const result = await sendToClaudeCode(
-          currentWorkDir,
-          prompt,
-          controller,
-          sessionId,
-          undefined, // onChunk callback not used
-          (jsonData) => {
-            streamMessageCount++;
-            // Process JSON stream data and send to Discord
-            const claudeMessages = convertToClaudeMessages(jsonData);
-            if (claudeMessages.length > 0) {
-              send(claudeMessages).catch((err) => {
-                console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
-              });
-            }
-          },
-          false, // continueMode = false
-          defaultModel ? { model: defaultModel } : undefined,
-          deps.workspaceRootDir
-        );
+        const result = await Promise.race([queryPromise, timeoutPromise]);
+
+        // Clear timeout if query finished before timeout
+        if (timeoutId) clearTimeout(timeoutId);
 
         deps.setClaudeSessionId(result.sessionId);
         deps.setClaudeController(null);
@@ -111,6 +137,9 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         return result;
       // deno-lint-ignore no-explicit-any
       } catch (error: any) {
+        // Clear timeout on error path too
+        if (timeoutId) clearTimeout(timeoutId);
+
         deps.setClaudeController(null);
         const errorMsg = error instanceof Error ? error.message : String(error);
         const stderrOutput = error.stderrOutput || '';
