@@ -1,4 +1,39 @@
-import { query as claudeQuery, type SDKMessage } from "@anthropic-ai/claude-code";
+import { query as claudeQuery, type SDKMessage, type CanUseTool } from "@anthropic-ai/claude-code";
+import { resolve, normalize, sep } from "node:path";
+
+/**
+ * Create a canUseTool guard that restricts file writes to the workspace directory.
+ * Read and execute operations are allowed everywhere.
+ */
+function createWorkspaceWriteGuard(workspaceRootDir: string, cwd: string): CanUseTool {
+  const normalizedRoot = normalize(resolve(workspaceRootDir));
+
+  return async (toolName: string, input: Record<string, unknown>) => {
+    // Write-capable tools and their path input keys
+    const writeToolPaths: Record<string, string> = {
+      'Write': 'file_path',
+      'Edit': 'file_path',
+      'NotebookEdit': 'notebook_path',
+    };
+
+    const pathKey = writeToolPaths[toolName];
+    if (pathKey) {
+      const filePath = input[pathKey] as string;
+      if (filePath) {
+        const resolvedPath = normalize(resolve(cwd, filePath));
+        if (resolvedPath !== normalizedRoot && !resolvedPath.startsWith(normalizedRoot + sep)) {
+          console.warn(`[Security] Blocked write outside workspace: ${toolName} -> ${filePath} (resolved: ${resolvedPath})`);
+          return {
+            behavior: 'deny' as const,
+            message: `Write operations are restricted to the workspace directory (${workspaceRootDir}). The path "${filePath}" is outside the allowed area. You can read files outside workspace but cannot write to them.`,
+          };
+        }
+      }
+    }
+
+    return { behavior: 'allow' as const, updatedInput: input };
+  };
+}
 
 // Clean session ID (remove unwanted characters)
 export function cleanSessionId(sessionId: string): string {
@@ -26,7 +61,8 @@ export async function sendToClaudeCode(
   // deno-lint-ignore no-explicit-any
   onStreamJson?: (json: any) => void,
   continueMode?: boolean,
-  modelOptions?: ClaudeModelOptions
+  modelOptions?: ClaudeModelOptions,
+  workspaceRootDir?: string
 ): Promise<{
   response: string;
   sessionId?: string;
@@ -54,7 +90,9 @@ export async function sendToClaudeCode(
         options: {
           cwd: workDir,
           pathToClaudeCodeExecutable: Deno.env.get("CLAUDE_PATH") || "claude",
-          permissionMode: "bypassPermissions" as const,
+          ...(workspaceRootDir
+            ? { canUseTool: createWorkspaceWriteGuard(workspaceRootDir, workDir) }
+            : { permissionMode: "bypassPermissions" as const }),
           verbose: true,
           outputFormat: "stream-json",
           ...(continueMode && { continue: true }),

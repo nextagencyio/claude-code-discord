@@ -355,6 +355,7 @@ export function createAllHandlers(
 
   const claudeHandlers = createClaudeHandlers({
     workDir: deps.getClaudeWorkDir || workDir,
+    workspaceRootDir: workDir,
     claudeController: claudeSession.getController(),
     setClaudeController: claudeSession.setController,
     setClaudeSessionId: claudeSession.setSessionId,

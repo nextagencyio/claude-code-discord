@@ -1,0 +1,30 @@
+# Claude Code Discord Bot - systemd service template
+#
+# Setup:
+#   1. Copy this file:        sudo cp claude-code-discord.service /etc/systemd/system/
+#   2. Edit the copy:         sudo systemctl edit --full claude-code-discord
+#      - Set User, WorkingDirectory, and Environment paths for your system
+#   3. Enable and start:      sudo systemctl enable --now claude-code-discord
+#
+# Logs:   sudo journalctl -u claude-code-discord -f
+# Status: sudo systemctl status claude-code-discord
+
+[Unit]
+Description=Claude Code Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# --- EDIT THESE FOR YOUR SYSTEM ---
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/claude-code-discord
+ExecStart=/bin/bash /path/to/claude-code-discord/run.sh
+Environment=HOME=/home/YOUR_USERNAME
+Environment=PATH=/home/YOUR_USERNAME/.deno/bin:/usr/local/bin:/usr/bin:/bin
+# ----------------------------------
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

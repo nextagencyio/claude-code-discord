@@ -646,7 +646,7 @@ if (import.meta.main) {
     const args = parseArgs(Deno.args);
     const categoryName = args.category || envCategoryName;
     const defaultMentionUserId = args.userId || envMentionUserId;
-    const workDir = envWorkDir || Deno.cwd();
+    const workDir = envWorkDir || `${Deno.cwd()}/workspace`;
     
     // Get Git information
     const gitInfo = await getGitInfo();

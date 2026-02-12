@@ -50,10 +50,10 @@ APPLICATION_ID=your_application_id_here
 # Optional
 USER_ID=your_discord_user_id          # Restrict bot to this user
 CATEGORY_NAME=claude-code-discord     # Discord category name for channels
-WORK_DIR=/path/to/workspace           # Base working directory (default: current)
+WORK_DIR=/path/to/workspace           # Base working directory (default: ./workspace)
 ```
 
-Each channel under the category gets its own subfolder: `WORK_DIR/channel-name/`
+Each channel under the category gets its own subfolder: `WORK_DIR/channel-name/` (defaults to `workspace/channel-name/`)
 
 ## Features
 
@@ -84,6 +84,28 @@ Claude's responses stream to Discord in real-time as embedded messages:
 
 ### Rate Limit Fallback
 If the primary model hits a rate limit, the bot automatically retries with Claude Sonnet 4.
+
+### Auto-Update (Production)
+Run with `deno task prod` (or `bash run.sh`) to start the bot with automatic updates. The runner checks `origin/main` every 60 seconds and, if new commits are found, pulls changes and restarts the bot. It also restarts the bot if the process crashes unexpectedly.
+
+### Run on Boot (systemd)
+To start the bot automatically when your machine boots:
+
+```bash
+# 1. Copy the template service file
+sudo cp claude-code-discord.service /etc/systemd/system/
+
+# 2. Edit it with your paths and username
+sudo systemctl edit --full claude-code-discord
+
+# 3. Enable and start
+sudo systemctl enable --now claude-code-discord
+```
+
+Useful commands:
+- `sudo systemctl status claude-code-discord` — check status
+- `sudo journalctl -u claude-code-discord -f` — tail logs
+- `sudo systemctl restart claude-code-discord` — restart
 
 ## Discord Bot Setup
 

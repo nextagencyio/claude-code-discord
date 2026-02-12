@@ -4,6 +4,7 @@ import { convertToClaudeMessages } from "./message-converter.ts";
 
 export interface ClaudeHandlerDeps {
   workDir: string | (() => string);
+  workspaceRootDir?: string;
   claudeController: AbortController | null;
   setClaudeController: (controller: AbortController | null) => void;
   setClaudeSessionId: (sessionId: string | undefined) => void;
@@ -58,7 +59,8 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           }
         },
         false, // continueMode = false
-        defaultModel ? { model: defaultModel } : undefined
+        defaultModel ? { model: defaultModel } : undefined,
+        deps.workspaceRootDir
       );
 
       deps.setClaudeSessionId(result.sessionId);
@@ -129,7 +131,8 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           }
         },
         true, // continueMode = true
-        continueDefaultModel ? { model: continueDefaultModel } : undefined
+        continueDefaultModel ? { model: continueDefaultModel } : undefined,
+        deps.workspaceRootDir
       );
 
       deps.setClaudeSessionId(result.sessionId);

@@ -2,6 +2,8 @@
 
 # Bot runtime data (persistence files)
 .bot-data/
+workspace/
+.claude-sessions.json
 
 # Plan files (development only)
 plan/
