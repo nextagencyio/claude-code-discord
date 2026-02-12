@@ -57,6 +57,14 @@ function getFileTypeInfo(filePath: string): { icon: string; language: string } {
   return fileTypes[ext] || { icon: '📄', language: 'Text' };
 }
 
+// Image file extensions
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
+
+function isImagePath(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
 // Tool-specific formatters
 function formatGenericTool(toolName: string, metadata: any): { title: string; color: number; description: string } {
   const inputStr = JSON.stringify(metadata.input || {}, null, 2);
@@ -162,7 +170,7 @@ export function createClaudeSender(sender: DiscordSender) {
             // All other tools use generic consistent formatting
             const inputStr = JSON.stringify(msg.metadata.input || {}, null, 2);
             const { preview, isTruncated } = truncateContent(inputStr, 3, 200);
-            
+
             const messageContent: MessageContent = {
               embeds: [{
                 color: 0x0099ff,
@@ -171,12 +179,21 @@ export function createClaudeSender(sender: DiscordSender) {
                 timestamp: true
               }]
             };
-            
-            // Add expand button if content was truncated
-            if (isTruncated) {
+
+            // Attach image file when Read tool targets an image
+            if (toolName === 'Read' && msg.metadata.input?.file_path && isImagePath(msg.metadata.input.file_path)) {
+              const filePath = msg.metadata.input.file_path;
+              const fileName = filePath.split('/').pop() || 'image.png';
+              messageContent.files = [{ path: filePath, name: fileName }];
+              messageContent.embeds![0].title = `🖼️ Image: ${fileName}`;
+              messageContent.embeds![0].description = `\`${filePath}\``;
+            }
+
+            // Add expand button if content was truncated (skip for image reads)
+            if (isTruncated && !messageContent.files?.length) {
               const expandId = `tool-${msg.metadata?.id || Date.now()}`;
               expandableContent.set(expandId, inputStr);
-              
+
               messageContent.components = [{
                 type: 'actionRow',
                 components: [{
@@ -187,7 +204,7 @@ export function createClaudeSender(sender: DiscordSender) {
                 }]
               }];
             }
-            
+
             await sender.sendMessage(messageContent);
           }
         }

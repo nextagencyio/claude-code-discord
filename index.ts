@@ -410,7 +410,7 @@ function createDiscordSenderAdapter(bot: any): DiscordSender {
               const button = new ButtonBuilder()
                 .setCustomId(comp.customId)
                 .setLabel(comp.label);
-              
+
               switch (comp.style) {
                 case 'primary': button.setStyle(ButtonStyle.Primary); break;
                 case 'secondary': button.setStyle(ButtonStyle.Secondary); break;
@@ -418,13 +418,18 @@ function createDiscordSenderAdapter(bot: any): DiscordSender {
                 case 'danger': button.setStyle(ButtonStyle.Danger); break;
                 case 'link': button.setStyle(ButtonStyle.Link); break;
               }
-              
+
               actionRow.addComponents(button);
             });
             return actionRow;
           });
         }
-        
+
+        if (content.files && content.files.length > 0) {
+          const { AttachmentBuilder } = await import("npm:discord.js@14.14.1");
+          payload.files = content.files.map(f => new AttachmentBuilder(f.path, { name: f.name }));
+        }
+
         await channel.send(payload);
       }
     }
