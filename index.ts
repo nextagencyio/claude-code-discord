@@ -24,16 +24,17 @@ import { DEFAULT_SETTINGS, UNIFIED_DEFAULT_SETTINGS } from "./settings/index.ts"
 import { cleanupPaginationStates } from "./discord/index.ts";
 
 // Core modules - now handle most of the heavy lifting
-import { 
-  parseArgs, 
-  createMessageHistory, 
-  createBotManagers, 
-  setupPeriodicCleanup, 
+import {
+  parseArgs,
+  createMessageHistory,
+  createBotManagers,
+  setupPeriodicCleanup,
   createBotSettings,
   createAllHandlers,
   getAllCommands,
   cleanSessionId,
   createButtonHandlers,
+  createExpandButtonHandler,
   createAllCommandHandlers,
   type BotManagers,
   type AllHandlers,
@@ -241,6 +242,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
     {},
     expandableContent
   );
+  const expandHandler = createExpandButtonHandler(expandableContent);
 
   // Create dependencies object for Discord bot
   const dependencies: BotDependencies = {
@@ -342,10 +344,15 @@ export async function createClaudeCodeBot(config: BotConfig) {
   async function processMessage(channelId: string, session: ChannelSession, ctx: InteractionContext, prompt: string) {
     messageHistoryOps.addToHistory(prompt);
 
+    // Create a per-channel sender so output always goes to the correct channel
+    const channelSendFn = createClaudeSender(
+      createDiscordSenderAdapter(() => bot.getChannelById(channelId))
+    );
+
     if (session.sessionId) {
-      await allHandlers.claude.onClaude(ctx, prompt, session.sessionId);
+      await allHandlers.claude.onClaude(ctx, prompt, session.sessionId, channelSendFn);
     } else {
-      await allHandlers.claude.onClaude(ctx, prompt);
+      await allHandlers.claude.onClaude(ctx, prompt, undefined, channelSendFn);
     }
 
     // Process next queued message if any
@@ -357,10 +364,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
   }
 
   // Create Discord bot
-  bot = await createDiscordBot(config, handlers, buttonHandlers, dependencies, crashHandler, onMessage);
+  bot = await createDiscordBot(config, handlers, buttonHandlers, dependencies, crashHandler, onMessage, expandHandler);
   
-  // Create Discord sender for Claude messages
-  claudeSender = createClaudeSender(createDiscordSenderAdapter(bot));
+  // Create Discord sender for Claude messages (fallback — uses bot's global active channel)
+  claudeSender = createClaudeSender(createDiscordSenderAdapter(() => bot.getChannel()));
   
   // Setup signal handlers for graceful shutdown
   setupSignalHandlers({
@@ -395,21 +402,22 @@ export async function createClaudeCodeBot(config: BotConfig) {
 // ================================
 
 /**
- * Create Discord sender adapter from bot instance.
+ * Create Discord sender adapter that routes to a specific channel.
+ * @param getChannel - Function that returns the target TextChannel (or null)
  */
 // deno-lint-ignore no-explicit-any
-function createDiscordSenderAdapter(bot: any): DiscordSender {
+function createDiscordSenderAdapter(getChannel: () => any): DiscordSender {
   return {
     async sendMessage(content) {
-      const channel = bot.getChannel();
+      const channel = getChannel();
       if (channel) {
         const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import("npm:discord.js@14.14.1");
-        
+
         // deno-lint-ignore no-explicit-any
         const payload: any = {};
-        
+
         if (content.content) payload.content = content.content;
-        
+
         if (content.embeds) {
           payload.embeds = content.embeds.map(e => {
             const embed = new EmbedBuilder();
@@ -422,7 +430,7 @@ function createDiscordSenderAdapter(bot: any): DiscordSender {
             return embed;
           });
         }
-        
+
         if (content.components) {
           payload.components = content.components.map(row => {
             // deno-lint-ignore no-explicit-any

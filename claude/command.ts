@@ -17,7 +17,8 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
   
   return {
     // deno-lint-ignore no-explicit-any
-    async onClaude(ctx: any, prompt: string, sessionId?: string): Promise<ClaudeResponse> {
+    async onClaude(ctx: any, prompt: string, sessionId?: string, channelSendFn?: (messages: ClaudeMessage[]) => Promise<void>): Promise<ClaudeResponse> {
+      const send = channelSendFn || sendClaudeMessages;
       const currentWorkDir = resolveWorkDir();
 
       // Cancel any existing session
@@ -53,7 +54,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           // Process JSON stream data and send to Discord
           const claudeMessages = convertToClaudeMessages(jsonData);
           if (claudeMessages.length > 0) {
-            sendClaudeMessages(claudeMessages).catch(() => {});
+            send(claudeMessages).catch(() => {});
           }
         },
         false, // continueMode = false
@@ -65,7 +66,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
 
       // Send completion message with interactive buttons
       if (result.sessionId) {
-        await sendClaudeMessages([{
+        await send([{
           type: 'system',
           content: '',
           metadata: {

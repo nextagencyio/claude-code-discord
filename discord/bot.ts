@@ -98,6 +98,7 @@ export async function createDiscordBot(
   // deno-lint-ignore no-explicit-any
   crashHandler?: any,
   onMessage?: (ctx: InteractionContext, messageContent: string, channelId: string, channelName: string, imageUrls?: string[], fileAttachments?: Array<{ url: string; name: string }>) => Promise<void>,
+  onExpandButton?: (ctx: InteractionContext, customId: string) => Promise<void>,
 ) {
   const { discordToken, applicationId, workDir, repoName, branchName, categoryName } = config;
   const actualCategoryName = categoryName || repoName;
@@ -400,35 +401,28 @@ export async function createDiscordBot(
       return;
     }
     
-    // Handle expand content pattern: "expand:contentId" 
+    // Handle expand content pattern: "expand:contentId"
     if (buttonId.startsWith('expand:')) {
-      const expandId = buttonId.substring(7);
-      
-      // Try to find a handler that can process expand buttons
-      for (const [handlerName, handler] of handlers.entries()) {
-        if (handler.handleButton) {
-          try {
-            await handler.handleButton(ctx, buttonId);
-            return;
-          } catch (error) {
-            console.error(`Error in ${handlerName} handleButton for expand:`, error);
-          }
+      if (onExpandButton) {
+        try {
+          await onExpandButton(ctx, buttonId);
+        } catch (error) {
+          console.error(`Error handling expand button:`, error);
         }
-      }
-      
-      // If no handler found, show default message
-      try {
-        await ctx.update({
-          embeds: [{
-            color: 0xffaa00,
-            title: '📖 Content Not Available',
-            description: 'The full content is no longer available for expansion.',
-            timestamp: true
-          }],
-          components: []
-        });
-      } catch (error) {
-        console.error(`Error handling expand button fallback:`, error);
+      } else {
+        try {
+          await ctx.update({
+            embeds: [{
+              color: 0xffaa00,
+              title: '📖 Content Not Available',
+              description: 'The full content is no longer available for expansion.',
+              timestamp: true
+            }],
+            components: []
+          });
+        } catch (error) {
+          console.error(`Error handling expand button fallback:`, error);
+        }
       }
       return;
     }
@@ -575,6 +569,10 @@ export async function createDiscordBot(
     client,
     getChannel() {
       return activeChannel;
+    },
+    getChannelById(channelId: string): TextChannel | null {
+      const ch = client.channels.cache.get(channelId);
+      return ch && ch.type === ChannelType.GuildText ? ch as TextChannel : null;
     },
     setActiveChannel(channel: TextChannel) {
       activeChannel = channel;
