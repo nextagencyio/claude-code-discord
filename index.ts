@@ -355,16 +355,24 @@ export async function createClaudeCodeBot(config: BotConfig) {
   async function processMessage(channelId: string, session: ChannelSession, ctx: InteractionContext, prompt: string) {
     messageHistoryOps.addToHistory(prompt);
 
+    // Create a per-channel controller so channels don't block each other
+    if (session.controller) {
+      session.controller.abort();
+    }
+    const controller = new AbortController();
+    session.controller = controller;
+
     // Create a per-channel sender so output always goes to the correct channel
     const channelSendFn = createClaudeSender(
       createDiscordSenderAdapter(() => bot.getChannelById(channelId))
     );
 
-    if (session.sessionId) {
-      await allHandlers.claude.onClaude(ctx, prompt, session.sessionId, channelSendFn);
-    } else {
-      await allHandlers.claude.onClaude(ctx, prompt, undefined, channelSendFn);
-    }
+    const result = await allHandlers.claude.onClaude(ctx, prompt, session.sessionId || undefined, channelSendFn, controller);
+
+    // Update per-channel session state from result
+    session.sessionId = result.sessionId;
+    session.controller = null;
+    saveSessionState();
 
     // Process next queued message if any
     const next = session.messageQueue.shift();

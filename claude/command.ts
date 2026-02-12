@@ -18,17 +18,19 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
   
   return {
     // deno-lint-ignore no-explicit-any
-    async onClaude(ctx: any, prompt: string, sessionId?: string, channelSendFn?: (messages: ClaudeMessage[]) => Promise<void>): Promise<ClaudeResponse> {
+    async onClaude(ctx: any, prompt: string, sessionId?: string, channelSendFn?: (messages: ClaudeMessage[]) => Promise<void>, externalController?: AbortController): Promise<ClaudeResponse> {
       const send = channelSendFn || sendClaudeMessages;
       const currentWorkDir = resolveWorkDir();
 
-      // Cancel any existing session
-      if (deps.claudeController) {
-        deps.claudeController.abort();
-      }
-
-      const controller = new AbortController();
-      deps.setClaudeController(controller);
+      // Use externally-provided controller (per-channel) or fall back to shared deps
+      const controller = externalController || (() => {
+        if (deps.claudeController) {
+          deps.claudeController.abort();
+        }
+        const c = new AbortController();
+        deps.setClaudeController(c);
+        return c;
+      })();
 
       // Defer interaction (execute first)
       await ctx.deferReply();
@@ -95,8 +97,10 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         // Clear timeout if query finished before timeout
         if (timeoutId) clearTimeout(timeoutId);
 
-        deps.setClaudeSessionId(result.sessionId);
-        deps.setClaudeController(null);
+        if (!externalController) {
+          deps.setClaudeSessionId(result.sessionId);
+          deps.setClaudeController(null);
+        }
 
         // Send completion message with interactive buttons
         if (result.sessionId) {
@@ -140,7 +144,9 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         // Clear timeout on error path too
         if (timeoutId) clearTimeout(timeoutId);
 
-        deps.setClaudeController(null);
+        if (!externalController) {
+          deps.setClaudeController(null);
+        }
         const errorMsg = error instanceof Error ? error.message : String(error);
         const stderrOutput = error.stderrOutput || '';
         console.error('[onClaude] sendToClaudeCode error:', errorMsg);
