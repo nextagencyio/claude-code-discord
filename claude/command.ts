@@ -55,7 +55,9 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           // Process JSON stream data and send to Discord
           const claudeMessages = convertToClaudeMessages(jsonData);
           if (claudeMessages.length > 0) {
-            send(claudeMessages).catch(() => {});
+            send(claudeMessages).catch((err) => {
+              console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
+            });
           }
         },
         false, // continueMode = false
@@ -127,7 +129,9 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           // Process JSON stream data and send to Discord
           const claudeMessages = convertToClaudeMessages(jsonData);
           if (claudeMessages.length > 0) {
-            sendClaudeMessages(claudeMessages).catch(() => {});
+            sendClaudeMessages(claudeMessages).catch((err) => {
+              console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
+            });
           }
         },
         true, // continueMode = true

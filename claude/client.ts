@@ -91,7 +91,6 @@ export async function sendToClaudeCode(
           cwd: workDir,
           pathToClaudeCodeExecutable: Deno.env.get("CLAUDE_PATH") || "claude",
           permissionMode: "bypassPermissions" as const,
-          ...(workspaceRootDir && { canUseTool: createWorkspaceWriteGuard(workspaceRootDir, workDir) }),
           verbose: true,
           outputFormat: "stream-json",
           ...(continueMode && { continue: true }),
