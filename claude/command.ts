@@ -45,46 +45,85 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       });
 
       const defaultModel = deps.getDefaultModel?.();
-      const result = await sendToClaudeCode(
-        currentWorkDir,
-        prompt,
-        controller,
-        sessionId,
-        undefined, // onChunk callback not used
-        (jsonData) => {
-          // Process JSON stream data and send to Discord
-          const claudeMessages = convertToClaudeMessages(jsonData);
-          if (claudeMessages.length > 0) {
-            send(claudeMessages).catch((err) => {
-              console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
-            });
-          }
-        },
-        false, // continueMode = false
-        defaultModel ? { model: defaultModel } : undefined,
-        deps.workspaceRootDir
-      );
+      let streamMessageCount = 0;
 
-      deps.setClaudeSessionId(result.sessionId);
-      deps.setClaudeController(null);
+      try {
+        const result = await sendToClaudeCode(
+          currentWorkDir,
+          prompt,
+          controller,
+          sessionId,
+          undefined, // onChunk callback not used
+          (jsonData) => {
+            streamMessageCount++;
+            // Process JSON stream data and send to Discord
+            const claudeMessages = convertToClaudeMessages(jsonData);
+            if (claudeMessages.length > 0) {
+              send(claudeMessages).catch((err) => {
+                console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
+              });
+            }
+          },
+          false, // continueMode = false
+          defaultModel ? { model: defaultModel } : undefined,
+          deps.workspaceRootDir
+        );
 
-      // Send completion message with interactive buttons
-      if (result.sessionId) {
-        await send([{
-          type: 'system',
-          content: '',
-          metadata: {
-            subtype: 'completion',
-            session_id: result.sessionId,
-            model: result.modelUsed || 'Default',
-            total_cost_usd: result.cost,
-            duration_ms: result.duration,
-            cwd: currentWorkDir
-          }
-        }]);
+        deps.setClaudeSessionId(result.sessionId);
+        deps.setClaudeController(null);
+
+        // Send completion message with interactive buttons
+        if (result.sessionId) {
+          await send([{
+            type: 'system',
+            content: '',
+            metadata: {
+              subtype: 'completion',
+              session_id: result.sessionId,
+              model: result.modelUsed || 'Default',
+              total_cost_usd: result.cost,
+              duration_ms: result.duration,
+              cwd: currentWorkDir
+            }
+          }]);
+        } else if (streamMessageCount === 0) {
+          // No session ID and no stream messages — something went wrong silently
+          await ctx.editReply({
+            embeds: [{
+              color: 0xff0000,
+              title: 'Claude Code - No Response',
+              description: `Claude Code returned without producing any output.\nResponse: \`${(result.response || 'empty').substring(0, 500)}\``,
+              fields: [
+                { name: 'Working Directory', value: `\`${currentWorkDir}\``, inline: false },
+                { name: 'Model', value: result.modelUsed || 'Default', inline: true },
+              ],
+              timestamp: true
+            }]
+          });
+        }
+
+        return result;
+      } catch (error) {
+        deps.setClaudeController(null);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error('[onClaude] sendToClaudeCode error:', errorMsg);
+
+        // Post error directly to Discord via ctx (which always works)
+        await ctx.editReply({
+          embeds: [{
+            color: 0xff0000,
+            title: 'Claude Code Error',
+            description: `\`\`\`\n${errorMsg.substring(0, 1500)}\n\`\`\``,
+            fields: [
+              { name: 'Working Directory', value: `\`${currentWorkDir}\``, inline: false },
+              { name: 'Stream Messages Received', value: `${streamMessageCount}`, inline: true },
+            ],
+            timestamp: true
+          }]
+        });
+
+        return { response: errorMsg, modelUsed: defaultModel || 'Default' };
       }
-
-      return result;
     },
     
     // deno-lint-ignore no-explicit-any

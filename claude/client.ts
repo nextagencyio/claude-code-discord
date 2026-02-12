@@ -102,19 +102,26 @@ export async function sendToClaudeCode(
         },
       };
       
-      console.log(`Claude Code: Running with ${modelToUse || 'default'} model...`);
+      console.log(`Claude Code: Running with ${modelToUse || 'default'} model in cwd: ${workDir}`);
       if (continueMode) {
         console.log(`Continue mode: Reading latest conversation in directory`);
       } else if (cleanedSessionId) {
         console.log(`Session resuming with ID: ${cleanedSessionId}`);
       }
-      
+
+      console.log(`Claude Code: Creating query iterator...`);
       const iterator = claudeQuery(queryOptions);
+      console.log(`Claude Code: Iterator created, starting to read messages...`);
       const currentMessages: SDKMessage[] = [];
       let currentResponse = "";
       let currentSessionId: string | undefined;
-      
+      let messageCount = 0;
+
       for await (const message of iterator) {
+        messageCount++;
+        if (messageCount === 1) {
+          console.log(`Claude Code: First message received (type: ${message.type})`);
+        }
         // Check AbortSignal to stop iteration
         if (controller.signal.aborted) {
           console.log(`Claude Code: Abort signal detected, stopping iteration`);
@@ -150,6 +157,8 @@ export async function sendToClaudeCode(
         }
       }
       
+      console.log(`Claude Code: Iterator finished. Total messages: ${messageCount}, sessionId: ${currentSessionId || 'none'}`);
+
       return {
         messages: currentMessages,
         response: currentResponse,
