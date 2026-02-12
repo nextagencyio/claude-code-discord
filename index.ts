@@ -230,6 +230,17 @@ export async function createClaudeCodeBot(config: BotConfig) {
     getClaudeSessionId: () => activeChannelId ? getChannelSession(activeChannelId).sessionId : undefined,
     setClaudeSessionId: (id) => { if (activeChannelId) { getChannelSession(activeChannelId).sessionId = id; saveSessionState(); } },
     setActiveChannelId: (channelId) => { activeChannelId = channelId; },
+    clearChannelQueue: () => {
+      if (activeChannelId) {
+        const session = channelSessions.get(activeChannelId);
+        if (session && session.messageQueue.length > 0) {
+          const count = session.messageQueue.length;
+          session.messageQueue.length = 0;
+          return count;
+        }
+      }
+      return 0;
+    },
     getClaudeWorkDir,
     crashHandler,
     healthMonitor,

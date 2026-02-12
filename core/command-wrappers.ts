@@ -37,6 +37,8 @@ export interface CommandWrapperDeps {
   healthMonitor: ProcessHealthMonitor;
   /** Bot settings */
   botSettings: { mentionEnabled: boolean; mentionUserId: string | null };
+  /** Clear the message queue for the active channel, returns number of cleared messages */
+  clearChannelQueue?: () => number;
   /** Cleanup interval ID */
   cleanupInterval: number;
 }
@@ -66,14 +68,18 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     execute: async (ctx: InteractionContext) => {
       setChannel(ctx);
       claudeHandlers.onClaudeCancel(ctx);
+      const cleared = deps.clearChannelQueue ? deps.clearChannelQueue() : 0;
       if (deps.setClaudeSessionId) {
         deps.setClaudeSessionId(undefined);
       }
+      const desc = cleared > 0
+        ? `Session has been reset for this channel. ${cleared} queued message(s) were also cleared.`
+        : "Session has been reset for this channel. Your next message will start a fresh conversation.";
       await ctx.reply({
         embeds: [{
           color: 0x00ff00,
           title: "Session Cleared",
-          description: "Session has been reset for this channel. Your next message will start a fresh conversation.",
+          description: desc,
           timestamp: true,
         }],
       });
@@ -85,13 +91,16 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     execute: async (ctx: InteractionContext) => {
       setChannel(ctx);
       const cancelled = claudeHandlers.onClaudeCancel(ctx);
+      const cleared = deps.clearChannelQueue ? deps.clearChannelQueue() : 0;
+      const parts: string[] = [];
+      if (cancelled) parts.push("Claude Code session cancelled.");
+      if (cleared > 0) parts.push(`${cleared} queued message(s) cleared.`);
+      if (!cancelled && cleared === 0) parts.push("No running Claude Code session in this channel.");
       await ctx.reply({
         embeds: [{
-          color: cancelled ? 0xff0000 : 0x808080,
-          title: cancelled ? "Cancelled" : "Nothing to Cancel",
-          description: cancelled
-            ? "Claude Code session cancelled."
-            : "No running Claude Code session in this channel.",
+          color: (cancelled || cleared > 0) ? 0xff0000 : 0x808080,
+          title: (cancelled || cleared > 0) ? "Cancelled" : "Nothing to Cancel",
+          description: parts.join(" "),
           timestamp: true,
         }],
       });
