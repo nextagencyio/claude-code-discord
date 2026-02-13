@@ -367,12 +367,18 @@ export async function createClaudeCodeBot(config: BotConfig) {
       createDiscordSenderAdapter(() => bot.getChannelById(channelId))
     );
 
-    const result = await allHandlers.claude.onClaude(ctx, prompt, session.sessionId || undefined, channelSendFn, controller);
+    try {
+      const result = await allHandlers.claude.onClaude(ctx, prompt, session.sessionId || undefined, channelSendFn, controller);
 
-    // Update per-channel session state from result
-    session.sessionId = result.sessionId;
-    session.controller = null;
-    saveSessionState();
+      // Update per-channel session state from result
+      session.sessionId = result.sessionId;
+      saveSessionState();
+    } catch (error) {
+      console.error(`[processMessage] Unhandled error in channel ${channelId}:`, error instanceof Error ? error.message : String(error));
+    } finally {
+      // ALWAYS clear the controller so the channel doesn't stay "busy" forever
+      session.controller = null;
+    }
 
     // Process next queued message if any
     const next = session.messageQueue.shift();
