@@ -33,7 +33,7 @@ import type {
 // ================================
 
 // deno-lint-ignore no-explicit-any
-function convertMessageContent(content: MessageContent): any {
+export function convertMessageContent(content: MessageContent): any {
   // deno-lint-ignore no-explicit-any
   const payload: any = {};
   

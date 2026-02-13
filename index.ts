@@ -11,11 +11,13 @@
 
 import {
   createDiscordBot,
+  convertMessageContent,
   type BotConfig,
   type InteractionContext,
   type CommandHandlers,
   type ButtonHandlers,
   type BotDependencies,
+  type MessageContent,
 } from "./discord/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
@@ -393,7 +395,105 @@ export async function createClaudeCodeBot(config: BotConfig) {
   
   // Create Discord sender for Claude messages (fallback — uses bot's global active channel)
   claudeSender = createClaudeSender(createDiscordSenderAdapter(() => bot.getChannel()));
-  
+
+  // ================================
+  // Scheduled Jobs
+  // ================================
+
+  const scheduledJobsEnv = Deno.env.get("SCHEDULED_JOBS");
+  if (scheduledJobsEnv) {
+    const { ChannelType } = await import("npm:discord.js@14.14.1");
+
+    interface ScheduledJob {
+      channelName: string;
+      cron: string;
+      prompt: string;
+    }
+
+    // Parse jobs from env: channel|cron|prompt separated by ;
+    const scheduledJobs: ScheduledJob[] = scheduledJobsEnv.split(';').map(entry => {
+      const parts = entry.trim().split('|');
+      if (parts.length < 3) return null;
+      return {
+        channelName: parts[0].trim(),
+        cron: parts[1].trim(),
+        prompt: parts.slice(2).join('|').trim(), // Allow | in prompt text
+      };
+    }).filter((j): j is ScheduledJob => j !== null);
+
+    if (scheduledJobs.length > 0) {
+      console.log(`Scheduled jobs loaded: ${scheduledJobs.map(j => `#${j.channelName} (${j.cron})`).join(', ')}`);
+
+      // Simple cron field matcher (supports *, ranges like 1-5, and lists like 1,3,5)
+      const matchField = (field: string, value: number): boolean => {
+        if (field === '*') return true;
+        return field.split(',').some(part => {
+          if (part.includes('-')) {
+            const [start, end] = part.split('-').map(Number);
+            return value >= start && value <= end;
+          }
+          return Number(part) === value;
+        });
+      };
+
+      const matchesCron = (cron: string, now: Date): boolean => {
+        const parts = cron.split(/\s+/);
+        if (parts.length < 5) return false;
+        const [minute, hour, dom, month, dow] = parts;
+        return matchField(minute, now.getMinutes())
+            && matchField(hour, now.getHours())
+            && matchField(dom, now.getDate())
+            && matchField(month, now.getMonth() + 1)
+            && matchField(dow, now.getDay());
+      };
+
+      // Create a synthetic InteractionContext for a channel (no real user interaction)
+      // deno-lint-ignore no-explicit-any
+      const createScheduledContext = (channel: any): InteractionContext => ({
+        channelId: channel.id,
+        async deferReply() { await channel.sendTyping(); },
+        async editReply(content: MessageContent) { await channel.send(convertMessageContent(content)); },
+        async followUp(content: MessageContent) { await channel.send(convertMessageContent(content)); },
+        async reply(content: MessageContent) { await channel.send(convertMessageContent(content)); },
+        async update(content: MessageContent) { await channel.send(convertMessageContent(content)); },
+        getString() { return null; },
+        getInteger() { return null; },
+        getBoolean() { return null; },
+      });
+
+      const lastRunTimes = new Map<string, number>();
+
+      setInterval(() => {
+        const now = new Date();
+        for (const job of scheduledJobs) {
+          if (!matchesCron(job.cron, now)) continue;
+
+          const key = `${job.channelName}:${job.cron}`;
+          const lastRun = lastRunTimes.get(key) || 0;
+          if (now.getTime() - lastRun < 120_000) continue; // Prevent double-fire
+          lastRunTimes.set(key, now.getTime());
+
+          // Find channel by name in any guild
+          const guild = bot.client.guilds.cache.first();
+          // deno-lint-ignore no-explicit-any
+          const channel = guild?.channels.cache.find((c: any) =>
+            c.type === ChannelType.GuildText && c.name === job.channelName
+          );
+          if (!channel) {
+            console.warn(`[Scheduler] Channel #${job.channelName} not found`);
+            continue;
+          }
+
+          console.log(`[Scheduler] Running job in #${job.channelName} at ${now.toLocaleTimeString()}`);
+          const ctx = createScheduledContext(channel);
+          onMessage(ctx, job.prompt, channel.id, job.channelName).catch(err => {
+            console.error(`[Scheduler] Error running job in #${job.channelName}:`, err instanceof Error ? err.message : String(err));
+          });
+        }
+      }, 60_000);
+    }
+  }
+
   // Setup signal handlers for graceful shutdown
   setupSignalHandlers({
     managers,
