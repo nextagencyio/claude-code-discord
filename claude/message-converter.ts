@@ -4,7 +4,21 @@ import type { ClaudeMessage } from "./types.ts";
 // deno-lint-ignore no-explicit-any
 export function convertToClaudeMessages(jsonData: any): ClaudeMessage[] {
   const messages: ClaudeMessage[] = [];
-  
+
+  // Synthetic heartbeat from sub-agent tracking
+  if (jsonData.type === '__heartbeat') {
+    messages.push({
+      type: 'system',
+      content: '',
+      metadata: {
+        subtype: 'heartbeat',
+        elapsed_ms: jsonData.elapsed_ms,
+        pending_subagents: jsonData.pending_subagents,
+      }
+    });
+    return messages;
+  }
+
   if (jsonData.type === 'assistant') {
     if (jsonData.message?.content) {
       const textContent = jsonData.message.content

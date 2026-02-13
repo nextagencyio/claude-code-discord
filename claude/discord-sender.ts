@@ -273,13 +273,29 @@ export function createClaudeSender(sender: DiscordSender) {
       }
       
       case 'system': {
+        // Sub-agent heartbeat — show "still working" status
+        if (msg.metadata?.subtype === 'heartbeat') {
+          const elapsed = msg.metadata.elapsed_ms || 0;
+          const minutes = Math.floor(elapsed / 60000);
+          const agents = msg.metadata.pending_subagents || 1;
+          await sender.sendMessage({
+            embeds: [{
+              color: 0xffaa00,
+              title: `⏳ Sub-agent Working (${minutes}m elapsed)`,
+              description: `Claude has ${agents} sub-agent${agents > 1 ? 's' : ''} running. Updates will resume when ${agents > 1 ? 'they' : 'it'} complete${agents > 1 ? '' : 's'}.`,
+              timestamp: true
+            }]
+          });
+          break;
+        }
+
         const embedData: EmbedData = {
           color: msg.metadata?.subtype === 'completion' ? 0x00ff00 : 0xaaaaaa,
           title: msg.metadata?.subtype === 'completion' ? '✅ Claude Code Complete' : `⚙️ System: ${msg.metadata?.subtype || 'info'}`,
           timestamp: true,
           fields: []
         };
-        
+
         if (msg.metadata?.cwd) {
           embedData.fields!.push({ name: 'Working Directory', value: `\`${msg.metadata.cwd}\``, inline: false });
         }

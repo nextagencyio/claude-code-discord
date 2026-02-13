@@ -130,18 +130,49 @@ export async function sendToClaudeCode(
       const STARTUP_TIMEOUT = 30000;
       // Activity timeout: abort if no messages for 5 minutes (handles hung CLI)
       const ACTIVITY_TIMEOUT = 5 * 60 * 1000;
+      // Extended timeout when sub-agents (Task tool) are running
+      const SUBAGENT_TIMEOUT = 30 * 60 * 1000;
+      // How often to send heartbeat messages while sub-agents work
+      const HEARTBEAT_INTERVAL = 2 * 60 * 1000;
 
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let pendingSubagents = 0;
+      let subagentStartTime = 0;
+      let heartbeatIntervalId: ReturnType<typeof setInterval> | null = null;
 
-      const resetActivityTimeout = () => {
+      const resetActivityTimeout = (duration?: number) => {
         if (timeoutId) clearTimeout(timeoutId);
+        const timeout = duration || ACTIVITY_TIMEOUT;
         if (!controller.signal.aborted) {
           timeoutId = setTimeout(() => {
             if (!controller.signal.aborted) {
-              console.error(`Claude Code: ACTIVITY TIMEOUT — no messages for ${ACTIVITY_TIMEOUT / 1000}s after ${messageCount} messages. Aborting.`);
+              console.error(`Claude Code: ACTIVITY TIMEOUT — no messages for ${timeout / 1000}s after ${messageCount} messages. Aborting.`);
               controller.abort();
             }
-          }, ACTIVITY_TIMEOUT);
+          }, timeout);
+        }
+      };
+
+      const startSubagentHeartbeat = () => {
+        if (heartbeatIntervalId) return;
+        heartbeatIntervalId = setInterval(() => {
+          if (pendingSubagents > 0 && onStreamJson && !controller.signal.aborted) {
+            const elapsed = Date.now() - subagentStartTime;
+            console.log(`Claude Code: Sub-agent heartbeat — ${pendingSubagents} agent(s) running for ${Math.floor(elapsed / 60000)}m`);
+            onStreamJson({
+              type: '__heartbeat',
+              elapsed_ms: elapsed,
+              pending_subagents: pendingSubagents,
+            });
+            resetActivityTimeout(SUBAGENT_TIMEOUT);
+          }
+        }, HEARTBEAT_INTERVAL);
+      };
+
+      const stopSubagentHeartbeat = () => {
+        if (heartbeatIntervalId) {
+          clearInterval(heartbeatIntervalId);
+          heartbeatIntervalId = null;
         }
       };
 
@@ -161,8 +192,8 @@ export async function sendToClaudeCode(
         if (messageCount === 1) {
           console.log(`Claude Code: First message received (type: ${message.type})`);
         }
-        // Reset activity timeout on every message
-        resetActivityTimeout();
+        // Reset activity timeout (use extended timeout if sub-agents are running)
+        resetActivityTimeout(pendingSubagents > 0 ? SUBAGENT_TIMEOUT : undefined);
         // Check AbortSignal to stop iteration
         if (controller.signal.aborted) {
           console.log(`Claude Code: Abort signal detected, stopping iteration`);
@@ -174,6 +205,42 @@ export async function sendToClaudeCode(
         // For JSON streams, call dedicated callback
         if (onStreamJson) {
           onStreamJson(message);
+        }
+
+        // Track sub-agent spawns (Task tool) — these cause long stream silences
+        // deno-lint-ignore no-explicit-any
+        if (message.type === 'assistant' && (message as any).message?.content) {
+          // deno-lint-ignore no-explicit-any
+          const taskTools = (message as any).message.content.filter(
+            // deno-lint-ignore no-explicit-any
+            (c: any) => c.type === 'tool_use' && c.name === 'Task'
+          );
+          if (taskTools.length > 0) {
+            pendingSubagents += taskTools.length;
+            if (subagentStartTime === 0) subagentStartTime = Date.now();
+            console.log(`Claude Code: ${taskTools.length} sub-agent(s) spawned (${pendingSubagents} total pending)`);
+            startSubagentHeartbeat();
+            resetActivityTimeout(SUBAGENT_TIMEOUT);
+          }
+        }
+
+        // Track tool_results coming back (sub-agents completing)
+        // deno-lint-ignore no-explicit-any
+        if (message.type === 'user' && (message as any).message?.content) {
+          // deno-lint-ignore no-explicit-any
+          const toolResults = (message as any).message.content.filter(
+            // deno-lint-ignore no-explicit-any
+            (c: any) => c.type === 'tool_result'
+          );
+          if (toolResults.length > 0 && pendingSubagents > 0) {
+            pendingSubagents = Math.max(0, pendingSubagents - toolResults.length);
+            if (pendingSubagents === 0) {
+              console.log(`Claude Code: All sub-agents completed (ran for ${Math.floor((Date.now() - subagentStartTime) / 60000)}m)`);
+              stopSubagentHeartbeat();
+              subagentStartTime = 0;
+              resetActivityTimeout(); // Back to normal timeout
+            }
+          }
         }
 
         // For text messages, send chunks
@@ -198,7 +265,8 @@ export async function sendToClaudeCode(
         }
       }
 
-      // Clear any pending timeout
+      // Clean up timers
+      stopSubagentHeartbeat();
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;

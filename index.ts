@@ -407,22 +407,39 @@ export async function createClaudeCodeBot(config: BotConfig) {
     interface ScheduledJob {
       channelName: string;
       cron: string;
+      staggerMinutes: number; // 0 = no stagger, >0 = random delay up to N minutes
       prompt: string;
     }
 
-    // Parse jobs from env: channel|cron|prompt separated by ;
+    // Parse jobs from env: channel|cron|prompt OR channel|cron|~60|prompt
+    // The optional ~N field adds a random 0-N minute stagger before firing
     const scheduledJobs: ScheduledJob[] = scheduledJobsEnv.split(';').map(entry => {
       const parts = entry.trim().split('|');
       if (parts.length < 3) return null;
+      const channelName = parts[0].trim();
+      const cron = parts[1].trim();
+      // Check if 3rd field is a stagger value (~N)
+      const maybeStagger = parts[2].trim();
+      const staggerMatch = maybeStagger.match(/^~(\d+)$/);
+      if (staggerMatch) {
+        if (parts.length < 4) return null; // Need at least channel|cron|~N|prompt
+        return {
+          channelName,
+          cron,
+          staggerMinutes: parseInt(staggerMatch[1], 10),
+          prompt: parts.slice(3).join('|').trim(),
+        };
+      }
       return {
-        channelName: parts[0].trim(),
-        cron: parts[1].trim(),
-        prompt: parts.slice(2).join('|').trim(), // Allow | in prompt text
+        channelName,
+        cron,
+        staggerMinutes: 0,
+        prompt: parts.slice(2).join('|').trim(),
       };
     }).filter((j): j is ScheduledJob => j !== null);
 
     if (scheduledJobs.length > 0) {
-      console.log(`Scheduled jobs loaded: ${scheduledJobs.map(j => `#${j.channelName} (${j.cron})`).join(', ')}`);
+      console.log(`Scheduled jobs loaded: ${scheduledJobs.map(j => `#${j.channelName} (${j.cron}${j.staggerMinutes ? ` ~${j.staggerMinutes}m` : ''})`).join(', ')}`);
 
       // Simple cron field matcher (supports *, ranges like 1-5, and lists like 1,3,5)
       const matchField = (field: string, value: number): boolean => {
@@ -462,6 +479,24 @@ export async function createClaudeCodeBot(config: BotConfig) {
       });
 
       const lastRunTimes = new Map<string, number>();
+      const pendingDelays = new Set<string>(); // Track jobs waiting on stagger delay
+
+      const runJob = (job: ScheduledJob) => {
+        const guild = bot.client.guilds.cache.first();
+        // deno-lint-ignore no-explicit-any
+        const channel = guild?.channels.cache.find((c: any) =>
+          c.type === ChannelType.GuildText && c.name === job.channelName
+        );
+        if (!channel) {
+          console.warn(`[Scheduler] Channel #${job.channelName} not found`);
+          return;
+        }
+        console.log(`[Scheduler] Running job in #${job.channelName} at ${new Date().toLocaleTimeString()}`);
+        const ctx = createScheduledContext(channel);
+        onMessage(ctx, job.prompt, channel.id, job.channelName).catch(err => {
+          console.error(`[Scheduler] Error running job in #${job.channelName}:`, err instanceof Error ? err.message : String(err));
+        });
+      };
 
       setInterval(() => {
         const now = new Date();
@@ -471,24 +506,22 @@ export async function createClaudeCodeBot(config: BotConfig) {
           const key = `${job.channelName}:${job.cron}`;
           const lastRun = lastRunTimes.get(key) || 0;
           if (now.getTime() - lastRun < 120_000) continue; // Prevent double-fire
+          if (pendingDelays.has(key)) continue; // Already waiting on stagger
           lastRunTimes.set(key, now.getTime());
 
-          // Find channel by name in any guild
-          const guild = bot.client.guilds.cache.first();
-          // deno-lint-ignore no-explicit-any
-          const channel = guild?.channels.cache.find((c: any) =>
-            c.type === ChannelType.GuildText && c.name === job.channelName
-          );
-          if (!channel) {
-            console.warn(`[Scheduler] Channel #${job.channelName} not found`);
-            continue;
+          if (job.staggerMinutes > 0) {
+            // Random stagger: delay 0-N minutes to emulate a human starting their day
+            const staggerMs = Math.floor(Math.random() * job.staggerMinutes * 60 * 1000);
+            const staggerMin = Math.floor(staggerMs / 60000);
+            console.log(`[Scheduler] Job #${job.channelName} matched — staggering by ${staggerMin}m (will run at ~${new Date(now.getTime() + staggerMs).toLocaleTimeString()})`);
+            pendingDelays.add(key);
+            setTimeout(() => {
+              pendingDelays.delete(key);
+              runJob(job);
+            }, staggerMs);
+          } else {
+            runJob(job);
           }
-
-          console.log(`[Scheduler] Running job in #${job.channelName} at ${now.toLocaleTimeString()}`);
-          const ctx = createScheduledContext(channel);
-          onMessage(ctx, job.prompt, channel.id, job.channelName).catch(err => {
-            console.error(`[Scheduler] Error running job in #${job.channelName}:`, err instanceof Error ? err.message : String(err));
-          });
         }
       }, 60_000);
     }
