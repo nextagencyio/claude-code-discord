@@ -127,27 +127,42 @@ export async function sendToClaudeCode(
       let messageCount = 0;
 
       // Startup timeout: abort if no first message within 30 seconds
-      let startupTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      const STARTUP_TIMEOUT = 30000;
+      // Activity timeout: abort if no messages for 5 minutes (handles hung CLI)
+      const ACTIVITY_TIMEOUT = 5 * 60 * 1000;
+
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const resetActivityTimeout = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (!controller.signal.aborted) {
+          timeoutId = setTimeout(() => {
+            if (!controller.signal.aborted) {
+              console.error(`Claude Code: ACTIVITY TIMEOUT — no messages for ${ACTIVITY_TIMEOUT / 1000}s after ${messageCount} messages. Aborting.`);
+              controller.abort();
+            }
+          }, ACTIVITY_TIMEOUT);
+        }
+      };
+
+      // Start with the startup timeout
       if (!controller.signal.aborted) {
-        startupTimeoutId = setTimeout(() => {
+        timeoutId = setTimeout(() => {
           if (messageCount === 0 && !controller.signal.aborted) {
             const stderrSummary = stderrLines.join('\n').substring(0, 500);
-            console.error(`Claude Code: TIMEOUT — no messages received after 30s. stderr: ${stderrSummary}`);
+            console.error(`Claude Code: STARTUP TIMEOUT — no messages received after ${STARTUP_TIMEOUT / 1000}s. stderr: ${stderrSummary}`);
             controller.abort();
           }
-        }, 30000);
+        }, STARTUP_TIMEOUT);
       }
 
       for await (const message of iterator) {
         messageCount++;
         if (messageCount === 1) {
-          // Clear the startup timeout once we get a first message
-          if (startupTimeoutId) {
-            clearTimeout(startupTimeoutId);
-            startupTimeoutId = null;
-          }
           console.log(`Claude Code: First message received (type: ${message.type})`);
         }
+        // Reset activity timeout on every message
+        resetActivityTimeout();
         // Check AbortSignal to stop iteration
         if (controller.signal.aborted) {
           console.log(`Claude Code: Abort signal detected, stopping iteration`);
@@ -183,9 +198,10 @@ export async function sendToClaudeCode(
         }
       }
 
-      // Clear timeout if still pending
-      if (startupTimeoutId) {
-        clearTimeout(startupTimeoutId);
+      // Clear any pending timeout
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
       }
 
       console.log(`Claude Code: Iterator finished. Total messages: ${messageCount}, sessionId: ${currentSessionId || 'none'}`);
