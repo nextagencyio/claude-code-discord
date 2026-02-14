@@ -62,7 +62,9 @@ export async function sendToClaudeCode(
   onStreamJson?: (json: any) => void,
   continueMode?: boolean,
   modelOptions?: ClaudeModelOptions,
-  workspaceRootDir?: string
+  workspaceRootDir?: string,
+  // deno-lint-ignore no-explicit-any
+  mcpServers?: Record<string, any>
 ): Promise<{
   response: string;
   sessionId?: string;
@@ -102,6 +104,7 @@ export async function sendToClaudeCode(
           ...(continueMode && { continue: true }),
           ...(shouldResume && { resume: cleanedSessionId }),
           ...(modelToUse && { model: modelToUse }),
+          ...(mcpServers && Object.keys(mcpServers).length > 0 && { mcpServers }),
           stderr: (data: string) => {
             stderrLines.push(data);
             console.error(`[Claude Code stderr]: ${data}`);

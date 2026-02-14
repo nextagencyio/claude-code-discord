@@ -497,6 +497,30 @@ export function getAllCommands() {
     new SlashCommandBuilder()
       .setName("status")
       .setDescription("Show current session and model info"),
+
+    new SlashCommandBuilder()
+      .setName("browser")
+      .setDescription("Connect Claude to your Chrome browser via CDP")
+      // deno-lint-ignore no-explicit-any
+      .addStringOption((option: any) =>
+        option
+          .setName("action")
+          .setDescription("Action to perform")
+          .setRequired(true)
+          .addChoices(
+            { name: "connect — Attach to Chrome", value: "connect" },
+            { name: "disconnect — Detach from Chrome", value: "disconnect" },
+            { name: "tabs — List open tabs", value: "tabs" },
+            { name: "status — Show connection status", value: "status" },
+          )
+      )
+      // deno-lint-ignore no-explicit-any
+      .addIntegerOption((option: any) =>
+        option
+          .setName("port")
+          .setDescription("Chrome debugging port (default: 9222)")
+          .setRequired(false)
+      ),
   ];
 }
 

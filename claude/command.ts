@@ -18,7 +18,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
   
   return {
     // deno-lint-ignore no-explicit-any
-    async onClaude(ctx: any, prompt: string, sessionId?: string, channelSendFn?: (messages: ClaudeMessage[]) => Promise<void>, externalController?: AbortController): Promise<ClaudeResponse> {
+    async onClaude(ctx: any, prompt: string, sessionId?: string, channelSendFn?: (messages: ClaudeMessage[]) => Promise<void>, externalController?: AbortController, mcpServers?: Record<string, any>): Promise<ClaudeResponse> {
       const send = channelSendFn || sendClaudeMessages;
       const currentWorkDir = resolveWorkDir();
 
@@ -88,7 +88,8 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         },
         false, // continueMode = false
         defaultModel ? { model: defaultModel } : undefined,
-        deps.workspaceRootDir
+        deps.workspaceRootDir,
+        mcpServers
       );
 
       try {

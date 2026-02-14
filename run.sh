@@ -2,9 +2,9 @@
 #
 # run.sh — Auto-updating bot runner
 #
-# Starts the Discord bot and checks for new commits on origin/main every 60 seconds.
-# If new commits are found, pulls changes and restarts the bot automatically.
-# Also restarts the bot if it crashes unexpectedly.
+# Starts the Discord bot and checks for updates every 60 seconds.
+# Restarts the bot when: (1) remote has new commits, (2) local HEAD moved
+# past the running commit (e.g. local push), or (3) the bot crashes.
 #
 # Usage: bash run.sh
 #        deno task prod
@@ -15,6 +15,7 @@ CHECK_INTERVAL=60
 BRANCH="main"
 REMOTE="origin"
 BOT_PID=""
+RUNNING_COMMIT=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() {
@@ -23,9 +24,10 @@ log() {
 
 start_bot() {
   cd "$SCRIPT_DIR"
+  RUNNING_COMMIT=$(git rev-parse HEAD)
   deno task start &
   BOT_PID=$!
-  log "Bot started (PID: $BOT_PID)"
+  log "Bot started (PID: $BOT_PID) on commit ${RUNNING_COMMIT:0:8}"
 }
 
 stop_bot() {
@@ -50,7 +52,8 @@ check_and_update() {
   REMOTE_HEAD=$(git rev-parse "$REMOTE/$BRANCH")
 
   if [ "$LOCAL" != "$REMOTE_HEAD" ]; then
-    log "New commits detected (local: ${LOCAL:0:8}, remote: ${REMOTE_HEAD:0:8})"
+    # Remote has new commits (pushed from elsewhere) — pull and restart
+    log "Remote update detected (local: ${LOCAL:0:8}, remote: ${REMOTE_HEAD:0:8})"
     stop_bot
     log "Pulling latest changes..."
     git pull "$REMOTE" "$BRANCH" --ff-only || {
@@ -59,6 +62,11 @@ check_and_update() {
       return
     }
     log "Update complete"
+    start_bot
+  elif [ "$LOCAL" != "$RUNNING_COMMIT" ]; then
+    # Local HEAD moved past the running commit (local push) — restart with new code
+    log "Local update detected (running: ${RUNNING_COMMIT:0:8}, current: ${LOCAL:0:8})"
+    stop_bot
     start_bot
   fi
 }

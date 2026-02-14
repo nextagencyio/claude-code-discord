@@ -71,6 +71,8 @@ export async function createClaudeCodeBot(config: BotConfig) {
     channelWorkDir: string;
     channelName?: string;
     messageQueue: QueuedMessage[];
+    // deno-lint-ignore no-explicit-any
+    mcpServers?: Record<string, any>;
   }
   const channelSessions = new Map<string, ChannelSession>();
   let activeChannelId: string | undefined;
@@ -247,6 +249,8 @@ export async function createClaudeCodeBot(config: BotConfig) {
     crashHandler,
     healthMonitor,
     botSettings,
+    getChannelMcpServers: () => activeChannelId ? getChannelSession(activeChannelId).mcpServers : undefined,
+    setChannelMcpServers: (servers) => { if (activeChannelId) getChannelSession(activeChannelId).mcpServers = servers; },
     cleanupInterval,
   });
 
@@ -370,7 +374,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
     );
 
     try {
-      const result = await allHandlers.claude.onClaude(ctx, prompt, session.sessionId || undefined, channelSendFn, controller);
+      const result = await allHandlers.claude.onClaude(ctx, prompt, session.sessionId || undefined, channelSendFn, controller, session.mcpServers);
 
       // Update per-channel session state from result
       session.sessionId = result.sessionId;
