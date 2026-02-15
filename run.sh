@@ -6,6 +6,10 @@
 # Restarts the bot when: (1) remote has new commits, (2) local HEAD moved
 # past the running commit (e.g. local push), or (3) the bot crashes.
 #
+# Crash backoff: if the bot dies within 30s of starting, waits progressively
+# longer (60s, 120s, 240s, up to 15m) to avoid burning Discord session quota.
+# A code update always resets the backoff and restarts immediately.
+#
 # Usage: bash run.sh
 #        deno task prod
 
@@ -18,13 +22,28 @@ BOT_PID=""
 RUNNING_COMMIT=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Crash backoff state
+CRASH_COUNT=0
+MAX_BACKOFF=900  # 15 minutes max
+BOT_START_TIME=0
+MIN_UPTIME=30    # Bot must survive 30s to reset crash counter
+
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+get_backoff() {
+  local delay=$((60 * (2 ** (CRASH_COUNT - 1))))
+  if [ "$delay" -gt "$MAX_BACKOFF" ]; then
+    delay=$MAX_BACKOFF
+  fi
+  echo "$delay"
 }
 
 start_bot() {
   cd "$SCRIPT_DIR"
   RUNNING_COMMIT=$(git rev-parse HEAD)
+  BOT_START_TIME=$(date +%s)
   deno task start &
   BOT_PID=$!
   log "Bot started (PID: $BOT_PID) on commit ${RUNNING_COMMIT:0:8}"
@@ -61,21 +80,41 @@ check_and_update() {
       start_bot
       return
     }
-    log "Update complete"
+    log "Update complete — resetting crash backoff"
+    CRASH_COUNT=0
     start_bot
   elif [ "$LOCAL" != "$RUNNING_COMMIT" ]; then
     # Local HEAD moved past the running commit (local push) — restart with new code
     log "Local update detected (running: ${RUNNING_COMMIT:0:8}, current: ${LOCAL:0:8})"
     stop_bot
+    log "New code on disk — resetting crash backoff"
+    CRASH_COUNT=0
     start_bot
   fi
 }
 
 check_bot_alive() {
   if [ -n "$BOT_PID" ] && ! kill -0 "$BOT_PID" 2>/dev/null; then
-    log "Bot process died unexpectedly, restarting..."
-    BOT_PID=""
-    start_bot
+    local now uptime
+    now=$(date +%s)
+    uptime=$((now - BOT_START_TIME))
+
+    if [ "$uptime" -ge "$MIN_UPTIME" ]; then
+      # Bot survived long enough — reset crash counter, restart immediately
+      log "Bot died after ${uptime}s uptime, restarting..."
+      CRASH_COUNT=0
+      BOT_PID=""
+      start_bot
+    else
+      # Bot crashed quickly — apply backoff
+      CRASH_COUNT=$((CRASH_COUNT + 1))
+      local delay
+      delay=$(get_backoff)
+      log "Bot crashed after ${uptime}s (crash #${CRASH_COUNT}), waiting ${delay}s before retry..."
+      BOT_PID=""
+      sleep "$delay"
+      start_bot
+    fi
   fi
 }
 
