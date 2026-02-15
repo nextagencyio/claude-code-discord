@@ -16,7 +16,7 @@ function truncateContent(content: string, maxLines = 15, maxChars = 1000): { pre
   const totalLines = lines.length;
   const truncatedLines = lines.slice(0, maxLines);
   const preview = truncatedLines.join('\n');
-  
+
   if (preview.length > maxChars) {
     return {
       preview: preview.substring(0, maxChars - 3) + '...',
@@ -24,37 +24,12 @@ function truncateContent(content: string, maxLines = 15, maxChars = 1000): { pre
       totalLines
     };
   }
-  
+
   return {
     preview,
     isTruncated: lines.length > maxLines,
     totalLines
   };
-}
-
-// Helper function to detect file type from path
-function getFileTypeInfo(filePath: string): { icon: string; language: string } {
-  const ext = filePath.split('.').pop()?.toLowerCase() || '';
-  
-  const fileTypes: Record<string, { icon: string; language: string }> = {
-    'ts': { icon: '📘', language: 'TypeScript' },
-    'tsx': { icon: '⚛️', language: 'React/TypeScript' },
-    'js': { icon: '📙', language: 'JavaScript' },
-    'jsx': { icon: '⚛️', language: 'React/JavaScript' },
-    'py': { icon: '🐍', language: 'Python' },
-    'rs': { icon: '🦀', language: 'Rust' },
-    'go': { icon: '🐹', language: 'Go' },
-    'java': { icon: '☕', language: 'Java' },
-    'md': { icon: '📝', language: 'Markdown' },
-    'json': { icon: '📋', language: 'JSON' },
-    'yml': { icon: '⚙️', language: 'YAML' },
-    'yaml': { icon: '⚙️', language: 'YAML' },
-    'html': { icon: '🌐', language: 'HTML' },
-    'css': { icon: '🎨', language: 'CSS' },
-    'scss': { icon: '🎨', language: 'SCSS' },
-  };
-  
-  return fileTypes[ext] || { icon: '📄', language: 'Text' };
 }
 
 // Image file extensions
@@ -65,17 +40,14 @@ function isImagePath(filePath: string): boolean {
   return IMAGE_EXTENSIONS.has(ext);
 }
 
-// Tool-specific formatters
-function formatGenericTool(toolName: string, metadata: any): { title: string; color: number; description: string } {
-  const inputStr = JSON.stringify(metadata.input || {}, null, 2);
-  const { preview, isTruncated } = truncateContent(inputStr, 10, 800);
-  
-  return {
-    title: `🔧 Tool Use: ${toolName}`,
-    color: 0x0099ff,
-    description: `\`\`\`json\n${preview}\n\`\`\``
-  };
-}
+// Tools whose invocations are high-signal enough to show in Discord.
+// Everything else (Read, Glob, Grep, WebFetch, WebSearch, etc.) is skipped.
+const HIGH_SIGNAL_TOOLS = new Set([
+  'Edit', 'Write', 'NotebookEdit',  // Code changes
+  'Bash',                            // Shell commands
+  'TodoWrite',                       // Task tracking
+  'Task',                            // Sub-agent spawning
+]);
 
 // Create sendClaudeMessages function with dependency injection
 export function createClaudeSender(sender: DiscordSender) {
@@ -83,6 +55,7 @@ export function createClaudeSender(sender: DiscordSender) {
   for (const msg of messages) {
     switch (msg.type) {
       case 'text': {
+        // Always show assistant text responses
         const chunks = splitText(msg.content, 4000);
         for (let i = 0; i < chunks.length; i++) {
           await sender.sendMessage({
@@ -96,182 +69,144 @@ export function createClaudeSender(sender: DiscordSender) {
         }
         break;
       }
-      
+
       case 'tool_use': {
-        if (msg.metadata?.name === 'TodoWrite') {
+        const toolName = msg.metadata?.name || 'Unknown';
+
+        // Skip low-signal tools (Read, Glob, Grep, etc.)
+        if (!HIGH_SIGNAL_TOOLS.has(toolName)) {
+          // Exception: show Read when it targets an image file (attaches the image)
+          if (toolName === 'Read' && msg.metadata?.input?.file_path && isImagePath(msg.metadata.input.file_path)) {
+            const filePath = msg.metadata.input.file_path;
+            const fileName = filePath.split('/').pop() || 'image.png';
+            await sender.sendMessage({
+              embeds: [{
+                color: 0x0099ff,
+                title: `Image: ${fileName}`,
+                description: `\`${filePath}\``,
+                timestamp: true
+              }],
+              files: [{ path: filePath, name: fileName }]
+            });
+          }
+          break;
+        }
+
+        if (toolName === 'TodoWrite') {
           const todos = msg.metadata?.input?.todos || [];
           const statusEmojis: Record<string, string> = {
             pending: '⏳',
             in_progress: '🔄',
             completed: '✅'
           };
-          const priorityEmojis: Record<string, string> = {
-            high: '🔴',
-            medium: '🟡',
-            low: '🟢'
-          };
-          
+
           let todoList = '';
           if (todos.length === 0) {
             todoList = 'Task list is empty';
           } else {
             for (const todo of todos) {
               const statusEmoji = statusEmojis[todo.status] || '❓';
-              const priorityEmoji = priorityEmojis[todo.priority] || '';
-              const priorityText = priorityEmoji ? `${priorityEmoji} ` : '';
-              todoList += `${statusEmoji} ${priorityText}**${todo.content}**\n`;
+              todoList += `${statusEmoji} **${todo.content}**\n`;
             }
           }
-          
+
           await sender.sendMessage({
             embeds: [{
               color: 0x9932cc,
-              title: '📝 Todo List Updated',
+              title: 'Todo List Updated',
               description: todoList,
-              footer: { text: '⏳ Pending | 🔄 In Progress | ✅ Completed | 🔴 High | 🟡 Medium | 🟢 Low' },
+              timestamp: true
+            }]
+          });
+        } else if (toolName === 'Edit') {
+          const filePath = msg.metadata.input?.file_path || 'Unknown file';
+          const oldString = msg.metadata.input?.old_string || '';
+          const newString = msg.metadata.input?.new_string || '';
+
+          const fields = [
+            { name: 'File', value: `\`${filePath}\``, inline: false }
+          ];
+
+          if (oldString) {
+            const { preview: oldPreview } = truncateContent(oldString, 2, 80);
+            fields.push({ name: 'Replacing', value: `\`\`\`\n${oldPreview}\n\`\`\``, inline: false });
+          }
+          if (newString) {
+            const { preview: newPreview } = truncateContent(newString, 2, 80);
+            fields.push({ name: 'With', value: `\`\`\`\n${newPreview}\n\`\`\``, inline: false });
+          }
+
+          await sender.sendMessage({
+            embeds: [{
+              color: 0xffaa00,
+              title: 'Edit',
+              fields,
+              timestamp: true
+            }]
+          });
+        } else if (toolName === 'Write') {
+          const filePath = msg.metadata.input?.file_path || 'Unknown file';
+          const content = msg.metadata.input?.content || '';
+          const lineCount = content.split('\n').length;
+
+          await sender.sendMessage({
+            embeds: [{
+              color: 0xffaa00,
+              title: 'Write',
+              description: `\`${filePath}\` (${lineCount} lines)`,
+              timestamp: true
+            }]
+          });
+        } else if (toolName === 'Bash') {
+          const command = msg.metadata.input?.command || '';
+          const { preview } = truncateContent(command, 3, 300);
+
+          await sender.sendMessage({
+            embeds: [{
+              color: 0x0099ff,
+              title: 'Bash',
+              description: `\`\`\`bash\n${preview}\n\`\`\``,
+              timestamp: true
+            }]
+          });
+        } else if (toolName === 'Task') {
+          const desc = msg.metadata.input?.description || msg.metadata.input?.prompt?.substring(0, 100) || 'Sub-agent task';
+
+          await sender.sendMessage({
+            embeds: [{
+              color: 0x9b59b6,
+              title: 'Sub-agent Spawned',
+              description: desc,
               timestamp: true
             }]
           });
         } else {
-          // Use simplified consistent formatting for all tools
-          const toolName = msg.metadata?.name || 'Unknown';
-          let embedData;
-          
-          // Special handling for Edit tool to keep "Replacing/With" functionality
-          if (toolName === 'Edit') {
-            const filePath = msg.metadata.input?.file_path || 'Unknown file';
-            const oldString = msg.metadata.input?.old_string || '';
-            const newString = msg.metadata.input?.new_string || '';
-            const fileInfo = getFileTypeInfo(filePath);
-            
-            const fields = [
-              { name: '📁 File Path', value: `\`${filePath}\``, inline: false }
-            ];
-            
-            if (oldString) {
-              const { preview: oldPreview } = truncateContent(oldString, 2, 80);
-              fields.push({ name: '🔴 Replacing', value: `\`\`\`\n${oldPreview}\n\`\`\``, inline: false });
-            }
+          // Fallback for other high-signal tools (NotebookEdit, etc.)
+          const inputStr = JSON.stringify(msg.metadata.input || {}, null, 2);
+          const { preview } = truncateContent(inputStr, 3, 200);
 
-            if (newString) {
-              const { preview: newPreview } = truncateContent(newString, 2, 80);
-              fields.push({ name: '🟢 With', value: `\`\`\`\n${newPreview}\n\`\`\``, inline: false });
-            }
-            
-            await sender.sendMessage({
-              embeds: [{
-                color: 0xffaa00,
-                title: '✏️ Tool Use: Edit',
-                fields,
-                timestamp: true
-              }]
-            });
-          } else {
-            // All other tools use generic consistent formatting
-            const inputStr = JSON.stringify(msg.metadata.input || {}, null, 2);
-            const { preview, isTruncated } = truncateContent(inputStr, 3, 200);
-
-            const messageContent: MessageContent = {
-              embeds: [{
-                color: 0x0099ff,
-                title: `🔧 Tool Use: ${toolName}`,
-                description: `\`\`\`json\n${preview}\n\`\`\``,
-                timestamp: true
-              }]
-            };
-
-            // Attach image file when Read tool targets an image
-            if (toolName === 'Read' && msg.metadata.input?.file_path && isImagePath(msg.metadata.input.file_path)) {
-              const filePath = msg.metadata.input.file_path;
-              const fileName = filePath.split('/').pop() || 'image.png';
-              messageContent.files = [{ path: filePath, name: fileName }];
-              messageContent.embeds![0].title = `🖼️ Image: ${fileName}`;
-              messageContent.embeds![0].description = `\`${filePath}\``;
-            }
-
-            // Add expand button if content was truncated (skip for image reads)
-            if (isTruncated && !messageContent.files?.length) {
-              const expandId = `tool-${msg.metadata?.id || Date.now()}`;
-              expandableContent.set(expandId, inputStr);
-
-              messageContent.components = [{
-                type: 'actionRow',
-                components: [{
-                  type: 'button',
-                  customId: `expand:${expandId}`,
-                  label: '📖 Show Full Content',
-                  style: 'secondary'
-                }]
-              }];
-            }
-
-            await sender.sendMessage(messageContent);
-          }
-        }
-        break;
-      }
-      
-      case 'tool_result': {
-        // Filter out system reminder content
-        let cleanContent = msg.content;
-        
-        // Remove system reminder blocks
-        cleanContent = cleanContent.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '');
-        
-        // Remove any remaining empty lines or extra whitespace
-        cleanContent = cleanContent.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
-        
-        if (!cleanContent) {
-          // If no content left after filtering, don't show the tool result
-          break;
-        }
-        
-        const { preview, isTruncated, totalLines } = truncateContent(cleanContent, 3, 200);
-        
-        const messageContent: MessageContent = {
-          embeds: [{
-            color: 0x00ffff,
-            title: `✅ Tool Result${isTruncated ? ` (+${totalLines - 15} more lines)` : ''}`,
-            description: `\`\`\`\n${preview}\n\`\`\``,
-            timestamp: true
-          }]
-        };
-        
-        // Add expand button if content was truncated
-        if (isTruncated) {
-          const expandId = `result-${Date.now()}`;
-          expandableContent.set(expandId, cleanContent);
-          
-          messageContent.components = [{
-            type: 'actionRow',
-            components: [{
-              type: 'button',
-              customId: `expand:${expandId}`,
-              label: '📖 Show Full Result',
-              style: 'secondary'
-            }]
-          }];
-        }
-        
-        await sender.sendMessage(messageContent);
-        break;
-      }
-      
-      case 'thinking': {
-        const chunks = splitText(msg.content, 4000);
-        for (let i = 0; i < chunks.length; i++) {
           await sender.sendMessage({
             embeds: [{
-              color: 0x9b59b6,
-              title: chunks.length > 1 ? `💭 Thinking (${i + 1}/${chunks.length})` : '💭 Thinking',
-              description: chunks[i],
+              color: 0x0099ff,
+              title: `Tool: ${toolName}`,
+              description: `\`\`\`json\n${preview}\n\`\`\``,
               timestamp: true
             }]
           });
         }
         break;
       }
-      
+
+      case 'tool_result': {
+        // Skip tool results — they're internal output Claude reads, not useful in Discord
+        break;
+      }
+
+      case 'thinking': {
+        // Skip thinking blocks — internal reasoning, too verbose for Discord
+        break;
+      }
+
       case 'system': {
         // Sub-agent heartbeat — show "still working" status
         if (msg.metadata?.subtype === 'heartbeat') {
@@ -281,8 +216,8 @@ export function createClaudeSender(sender: DiscordSender) {
           await sender.sendMessage({
             embeds: [{
               color: 0xffaa00,
-              title: `⏳ Sub-agent Working (${minutes}m elapsed)`,
-              description: `Claude has ${agents} sub-agent${agents > 1 ? 's' : ''} running. Updates will resume when ${agents > 1 ? 'they' : 'it'} complete${agents > 1 ? '' : 's'}.`,
+              title: `Sub-agent Working (${minutes}m elapsed)`,
+              description: `${agents} sub-agent${agents > 1 ? 's' : ''} running.`,
               timestamp: true
             }]
           });
@@ -291,17 +226,11 @@ export function createClaudeSender(sender: DiscordSender) {
 
         const embedData: EmbedData = {
           color: msg.metadata?.subtype === 'completion' ? 0x00ff00 : 0xaaaaaa,
-          title: msg.metadata?.subtype === 'completion' ? '✅ Claude Code Complete' : `⚙️ System: ${msg.metadata?.subtype || 'info'}`,
+          title: msg.metadata?.subtype === 'completion' ? 'Claude Code Complete' : `System: ${msg.metadata?.subtype || 'info'}`,
           timestamp: true,
           fields: []
         };
 
-        if (msg.metadata?.cwd) {
-          embedData.fields!.push({ name: 'Working Directory', value: `\`${msg.metadata.cwd}\``, inline: false });
-        }
-        if (msg.metadata?.session_id) {
-          embedData.fields!.push({ name: 'Session ID', value: `\`${msg.metadata.session_id}\``, inline: false });
-        }
         if (msg.metadata?.model) {
           embedData.fields!.push({ name: 'Model', value: msg.metadata.model, inline: true });
         }
@@ -311,11 +240,11 @@ export function createClaudeSender(sender: DiscordSender) {
         if (msg.metadata?.duration_ms !== undefined) {
           embedData.fields!.push({ name: 'Duration', value: `${(msg.metadata.duration_ms / 1000).toFixed(2)}s`, inline: true });
         }
-        
+
         // Special handling for shutdown
         if (msg.metadata?.subtype === 'shutdown') {
           embedData.color = 0xff0000;
-          embedData.title = '🛑 Shutdown';
+          embedData.title = 'Shutdown';
           embedData.description = `Bot stopped by signal ${msg.metadata.signal}`;
           embedData.fields = [
             { name: 'Category', value: msg.metadata.categoryName, inline: true },
@@ -323,26 +252,13 @@ export function createClaudeSender(sender: DiscordSender) {
             { name: 'Branch', value: msg.metadata.branchName, inline: true }
           ];
         }
-        
+
         await sender.sendMessage({ embeds: [embedData] });
         break;
       }
-      
+
       case 'other': {
-        const jsonStr = JSON.stringify(msg.metadata || msg.content, null, 2);
-        // Account for code block markers when splitting
-        const maxChunkLength = 4096 - "```json\n\n```".length - 50; // 50 chars safety margin
-        const chunks = splitText(jsonStr, maxChunkLength);
-        for (let i = 0; i < chunks.length; i++) {
-          await sender.sendMessage({
-            embeds: [{
-              color: 0xffaa00,
-              title: chunks.length > 1 ? `Other Content (${i + 1}/${chunks.length})` : 'Other Content',
-              description: `\`\`\`json\n${chunks[i]}\n\`\`\``,
-              timestamp: true
-            }]
-          });
-        }
+        // Skip miscellaneous content — rarely useful
         break;
       }
     }

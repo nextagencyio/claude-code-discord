@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 340px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #e0e0e0;
+      background: #1a1a2e;
+    }
+    .header {
+      padding: 14px 16px;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header h1 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.connected { background: #00ff88; box-shadow: 0 0 6px #00ff8866; }
+    .status-dot.disconnected { background: #ff4444; box-shadow: 0 0 6px #ff444466; }
+
+    .section {
+      padding: 12px 16px;
+      border-bottom: 1px solid #0f3460;
+    }
+    .section:last-child { border-bottom: none; }
+    .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+    }
+    .info-label { color: #999; }
+    .info-value { color: #fff; font-weight: 500; }
+
+    .tab-list {
+      max-height: 160px;
+      overflow-y: auto;
+    }
+    .tab-item {
+      padding: 6px 8px;
+      border-radius: 4px;
+      margin-bottom: 2px;
+      background: #16213e;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 12px;
+    }
+    .tab-item .tab-title { color: #ccc; }
+    .tab-item .tab-url {
+      color: #666;
+      font-size: 11px;
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 6px;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn:last-child { margin-bottom: 0; }
+    .btn-primary { background: #5865f2; color: #fff; }
+    .btn-secondary { background: #2d2d44; color: #ccc; }
+    .btn-success { background: #248045; color: #fff; }
+
+    .instructions {
+      background: #16213e;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .instructions code {
+      background: #0d1117;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-size: 11px;
+      color: #79c0ff;
+      display: inline-block;
+      margin: 2px 0;
+    }
+    .instructions pre {
+      background: #0d1117;
+      padding: 8px 10px;
+      border-radius: 4px;
+      margin: 6px 0;
+      overflow-x: auto;
+      font-size: 11px;
+      color: #79c0ff;
+    }
+
+    .port-input {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .port-input label { color: #999; font-size: 12px; white-space: nowrap; }
+    .port-input input {
+      width: 70px;
+      padding: 4px 8px;
+      background: #0d1117;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #248045;
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+
+    .spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #444;
+      border-top-color: #5865f2;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #loading { text-align: center; padding: 30px; }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="spinner"></div>
+    <p style="margin-top:10px; color:#888;">Checking CDP...</p>
+  </div>
+
+  <div id="app" style="display:none;">
+    <!-- Header -->
+    <div class="header">
+      <div class="status-dot" id="statusDot"></div>
+      <h1 id="statusText">Claude Code Bridge</h1>
+    </div>
+
+    <!-- Connected view -->
+    <div id="connectedView" style="display:none;">
+      <div class="section">
+        <div class="section-title">Connection</div>
+        <div class="info-row">
+          <span class="info-label">Browser</span>
+          <span class="info-value" id="browserName">-</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Port</span>
+          <span class="info-value" id="portValue">-</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Protocol</span>
+          <span class="info-value" id="protocolValue">-</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title" id="tabsTitle">Tabs</div>
+        <div class="tab-list" id="tabList"></div>
+      </div>
+
+      <div class="section">
+        <button class="btn btn-primary" id="copyCmd">Copy /browser connect command</button>
+        <button class="btn btn-secondary" id="refresh">Refresh</button>
+      </div>
+    </div>
+
+    <!-- Disconnected view -->
+    <div id="disconnectedView" style="display:none;">
+      <div class="section">
+        <div class="port-input">
+          <label>CDP Port:</label>
+          <input type="number" id="portInput" value="9222" min="1024" max="65535">
+          <button class="btn btn-secondary" id="retryBtn" style="width:auto; margin:0; padding:6px 12px;">Retry</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">How to connect</div>
+        <div class="instructions">
+          <p>Chrome needs to be launched with remote debugging enabled.</p>
+          <p style="margin-top:8px;"><strong>Linux:</strong></p>
+          <pre>google-chrome --remote-debugging-port=9222</pre>
+          <p><strong>macOS:</strong></p>
+          <pre>/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222</pre>
+          <p style="margin-top:8px;">Then click <strong>Retry</strong> above, or reload this extension.</p>
+          <p style="margin-top:8px; color:#888;">Tip: Add the flag to your Chrome shortcut so it's always available.</p>
+        </div>
+      </div>
+
+      <div class="section">
+        <button class="btn btn-secondary" id="copyLaunch">Copy launch command</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
