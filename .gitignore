@@ -90,3 +90,5 @@ agenthub/agents/youtube/db
 
 # Mobile development
 android-sdk/ 
+.aider*
+.playwright-mcp/
