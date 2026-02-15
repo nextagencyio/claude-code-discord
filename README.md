@@ -1,5 +1,11 @@
 # claude-code-discord
 
+> **WARNING: This is an experimental, personal project. Use at your own risk.**
+>
+> This bot runs Claude Code sessions on your machine with broad system access (shell commands, file operations, git, screenshots, etc.). It is intended for **developers who understand the risks** of exposing an AI coding agent through Discord. There are no warranties, no guarantees of stability, and things may break or behave unexpectedly.
+>
+> This project exists primarily for **educational purposes** — to demonstrate Discord-to-Claude automation patterns. Feel free to learn from it and take what you find useful, but understand that you are fully responsible for anything that happens when you run it.
+
 A Discord bot that gives you a conversational interface to [Claude Code](https://claude.ai/code). Type messages in Discord channels and they're relayed directly to Claude Code sessions running on your machine.
 
 ## How It Works
@@ -12,14 +18,100 @@ A Discord bot that gives you a conversational interface to [Claude Code](https:/
 
 ## Commands
 
-Only 4 slash commands:
+48 slash commands organized by category:
+
+### Core
 
 | Command | Description |
 |---------|-------------|
-| `/new` | Clear the session and start fresh in the current channel |
+| `/new` | Clear session and start fresh in the current channel |
 | `/cancel` | Cancel the currently running Claude session |
-| `/model` | Switch the Claude model (e.g. `claude-opus-4-6`, `claude-sonnet-4-5-20250929`) |
+| `/model` | Quick model switch |
 | `/status` | Show current session info, working directory, and run state |
+| `/browser` | Manage Chrome CDP connection for authenticated browser control |
+
+### Claude Integration
+
+| Command | Description |
+|---------|-------------|
+| `/claude` | Send prompts to Claude Code CLI |
+| `/continue` | Continue the most recent conversation in this directory |
+| `/claude-enhanced` | Send message with advanced options |
+| `/claude-models` | List available models and capabilities |
+| `/claude-sessions` | Manage Claude Code sessions |
+| `/claude-context` | Show context information that would be sent to Claude |
+
+### Claude Development Tools
+
+| Command | Description |
+|---------|-------------|
+| `/claude-explain` | Ask Claude to explain code, concepts, or errors |
+| `/claude-debug` | Get help debugging code issues |
+| `/claude-optimize` | Get code optimization suggestions |
+| `/claude-review` | Get comprehensive code review |
+| `/claude-generate` | Generate code, tests, or documentation |
+| `/claude-refactor` | Refactor existing code with guidance |
+| `/claude-learn` | Learn programming concepts with Claude as tutor |
+
+### Git
+
+| Command | Description |
+|---------|-------------|
+| `/git` | Execute git command |
+| `/worktree` | Create git worktree |
+| `/worktree-list` | List git worktrees |
+| `/worktree-remove` | Remove git worktree |
+| `/worktree-bots` | List running worktree bot processes |
+| `/worktree-kill` | Kill a specific worktree bot process |
+
+### Shell
+
+| Command | Description |
+|---------|-------------|
+| `/shell` | Execute shell command (supports interactive commands) |
+| `/shell-input` | Send stdin to running shell process |
+| `/shell-list` | List running shell commands |
+| `/shell-kill` | Stop running shell command |
+
+### System Monitoring
+
+| Command | Description |
+|---------|-------------|
+| `/system-info` | Display comprehensive system information |
+| `/processes` | List running processes |
+| `/system-resources` | Show CPU, memory, and disk usage |
+| `/network-info` | Display network interfaces and connections |
+| `/disk-usage` | Show disk space for all mounted drives |
+| `/env-vars` | List environment variables |
+| `/system-logs` | Show recent system logs |
+| `/port-scan` | Check which ports are open/listening |
+| `/service-status` | Check status of system services |
+| `/uptime` | Show system uptime and load averages |
+
+### Utility
+
+| Command | Description |
+|---------|-------------|
+| `/pwd` | Show current working directory |
+| `/shutdown` | Shutdown the bot |
+| `/screenshot` | Capture and share a screenshot of the host screen |
+
+### Settings
+
+| Command | Description |
+|---------|-------------|
+| `/settings` | Manage all bot settings in one place |
+| `/claude-settings` | Manage Claude Code specific settings |
+| `/output-settings` | Configure output formatting and display |
+| `/quick-model` | Quickly switch model for next conversation |
+
+### Advanced
+
+| Command | Description |
+|---------|-------------|
+| `/agent` | Interact with specialized AI agents |
+| `/todos` | Manage development todos with API rate limit awareness |
+| `/help` | Display detailed help for all commands |
 
 ## Quick Start
 
@@ -86,7 +178,7 @@ Claude's responses stream to Discord in real-time as embedded messages:
 If the primary model hits a rate limit, the bot automatically retries with Claude Sonnet 4.
 
 ### Auto-Update (Production)
-Run with `deno task prod` (or `bash run.sh`) to start the bot with automatic updates. The runner checks `origin/main` every 60 seconds and, if new commits are found, pulls changes and restarts the bot. It also restarts the bot if the process crashes unexpectedly.
+Run with `deno task prod` (or `bash run.sh`) to start the bot with automatic updates. The runner checks `origin/main` every 60 seconds and, if new commits are found, pulls changes and restarts the bot. It includes crash backoff to avoid burning Discord session quota if the bot keeps dying on startup.
 
 ### Run on Boot (systemd)
 To start the bot automatically when your machine boots:
@@ -124,15 +216,20 @@ Useful commands:
 ## Architecture
 
 ```
-index.ts                  — Entry point, per-channel session management, message queuing
-discord/bot.ts            — Discord.js client, message listener, command routing
-claude/command.ts         — Claude Code handler (onClaude, onContinue, onClaudeCancel)
-claude/client.ts          — SDK wrapper for @anthropic-ai/claude-code
-claude/discord-sender.ts  — Formats Claude output as Discord embeds
-claude/message-converter.ts — Converts SDK stream JSON to typed messages
-core/command-wrappers.ts  — 4 slash command handlers
-core/handler-registry.ts  — Handler factory and command registration
-core/button-handlers.ts   — Expand/collapse buttons for truncated content
+index.ts                     — Entry point, per-channel session management, message queuing
+discord/                     — Discord.js client, message listener, command routing, formatting
+claude/                      — Claude Code SDK wrapper, stream handling, Discord embed output
+core/                        — Slash command handlers, handler registry, button handlers, config
+git/                         — Git and worktree command handlers
+shell/                       — Shell execution with interactive stdin support
+system/                      — System monitoring commands (processes, resources, network, etc.)
+screenshot/                  — Host screen capture and sharing
+settings/                    — Bot settings management (model, output, unified settings)
+agent/                       — Specialized AI agent interactions
+help/                        — Help command with full command reference
+util/                        — Persistence, platform detection, usage tracking, process management
+types/                       — Shared TypeScript types
+tests/                       — Verification and integration tests
 ```
 
 ## License
