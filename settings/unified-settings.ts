@@ -53,7 +53,7 @@ export const UNIFIED_DEFAULT_SETTINGS: UnifiedBotSettings = {
   mentionUserId: null,
   
   // Claude settings (only CLI-supported options)
-  defaultModel: 'claude-opus-4-6',
+  defaultModel: 'claude-opus-4-8',
   defaultSystemPrompt: null,
   autoIncludeSystemInfo: false,
   autoIncludeGitContext: true,

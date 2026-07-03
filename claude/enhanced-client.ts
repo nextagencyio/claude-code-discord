@@ -273,11 +273,18 @@ async function getDenoInfo(): Promise<string> {
 
 // Claude Code model options - Updated with latest models
 export const CLAUDE_MODELS = {
-  'claude-opus-4-6': {
-    name: 'Claude Opus 4.6',
+  'claude-opus-4-8': {
+    name: 'Claude Opus 4.8',
     description: 'Most powerful Claude model with superior reasoning and coding',
     contextWindow: 200000,
     recommended: true,
+    supportsThinking: true
+  },
+  'claude-opus-4-6': {
+    name: 'Claude Opus 4.6',
+    description: 'Previous-generation Opus with strong reasoning and coding',
+    contextWindow: 200000,
+    recommended: false,
     supportsThinking: true
   },
   'claude-sonnet-4-5-20250929': {
