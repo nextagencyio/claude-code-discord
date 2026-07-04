@@ -132,6 +132,14 @@ export async function createClaudeCodeBot(config: BotConfig) {
         channelName: folderName,
         messageQueue: [],
       });
+    } else if (channelName && channelName !== channelId) {
+      // If session was restored with ID as name (fallback), correct it now that we have the real name
+      const session = channelSessions.get(channelId)!;
+      if (session.channelName === channelId) {
+        session.channelName = channelName;
+        session.channelWorkDir = `${workDir}/${channelName}`;
+        console.log(`[Session] Corrected channel ${channelId} workDir to ${session.channelWorkDir}`);
+      }
     }
     return channelSessions.get(channelId)!;
   }
@@ -668,21 +676,10 @@ function setupSignalHandlers(ctx: {
         }
       }
       
-      // Send shutdown message
-      if (claudeSender) {
-        await claudeSender([{
-          type: 'system',
-          content: '',
-          metadata: {
-            subtype: 'shutdown',
-            signal,
-            categoryName: actualCategoryName,
-            repoName,
-            branchName
-          }
-        }]);
-      }
-      
+      // Shutdown notification intentionally suppressed — the bot's crash-backoff
+      // restart loop fired a red "Shutdown SIGTERM" embed on every restart, which
+      // was just channel noise. (Completion/cost embeds are still sent.)
+
       // Cleanup
       healthMonitor.stopAll();
       crashHandler.cleanup();

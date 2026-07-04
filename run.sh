@@ -70,7 +70,10 @@ check_and_update() {
   LOCAL=$(git rev-parse HEAD)
   REMOTE_HEAD=$(git rev-parse "$REMOTE/$BRANCH")
 
-  if [ "$LOCAL" != "$REMOTE_HEAD" ]; then
+  # Only pull when the remote is GENUINELY AHEAD (HEAD is an ancestor of the
+  # remote). Without this ancestor check, an unpushed local commit makes
+  # LOCAL != REMOTE_HEAD forever, which restart-loops the bot every cycle.
+  if [ "$LOCAL" != "$REMOTE_HEAD" ] && git merge-base --is-ancestor HEAD "$REMOTE/$BRANCH" 2>/dev/null; then
     # Remote has new commits (pushed from elsewhere) — pull and restart
     log "Remote update detected (local: ${LOCAL:0:8}, remote: ${REMOTE_HEAD:0:8})"
     stop_bot
