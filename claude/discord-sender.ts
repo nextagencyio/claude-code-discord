@@ -208,6 +208,11 @@ export function createClaudeSender(sender: DiscordSender) {
       }
 
       case 'system': {
+        // Skip pure telemetry subtypes — token accounting, not reader-facing
+        if (msg.metadata?.subtype === 'thinking_tokens') {
+          break;
+        }
+
         // Sub-agent heartbeat — show "still working" status
         if (msg.metadata?.subtype === 'heartbeat') {
           const elapsed = msg.metadata.elapsed_ms || 0;
