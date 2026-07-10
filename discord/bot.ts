@@ -561,6 +561,56 @@ export async function createDiscordBot(
     }
   });
 
+  // ================================
+  // Gateway watchdog — self-heal a silently-wedged connection
+  // ================================
+  // The bot can reach a state where the process is alive and idle but the
+  // gateway WebSocket is silently dead: TCP stays ESTAB, discord.js still
+  // reports "ready", yet no MESSAGE_CREATE events ever arrive. run.sh only
+  // restarts on *process death*, so nothing catches this — the bot can sit
+  // dead for hours. We detect it here and exit(1) so run.sh restarts us.
+  //
+  // The reliable liveness signal is the heartbeat ACK. Discord ACKs a
+  // heartbeat roughly every 41s; when the connection zombies, ACKs stop while
+  // everything else looks healthy. We only treat an ACK (or a fresh
+  // ready/resume) as activity — deliberately NOT "sending a heartbeat", since
+  // a wedged shard keeps sending while never getting ACKed.
+  const WATCHDOG_STALE_MS = 5 * 60_000; // no ACK for 5 min (~7 missed) => wedged
+  const WATCHDOG_POLL_MS = 30_000;
+  let lastGatewayActivity = Date.now();
+  const markGatewayAlive = () => { lastGatewayActivity = Date.now(); };
+
+  client.on(Events.Debug, (msg: string) => {
+    // discord.js@14 emits e.g. "[WS => Shard 0] Heartbeat acknowledged, latency of 42ms."
+    if (msg.includes('Heartbeat acknowledged')) markGatewayAlive();
+  });
+  client.on(Events.ShardReady, markGatewayAlive);
+  client.on(Events.ShardResume, markGatewayAlive);
+  client.on(Events.ShardReconnecting, (shardId) => {
+    console.warn(`[Watchdog] Shard ${shardId} reconnecting...`);
+  });
+  client.on(Events.ShardDisconnect, (event, shardId) => {
+    console.error(`[Watchdog] Shard ${shardId} disconnected (code ${event.code}) — will exit if it does not recover.`);
+  });
+  client.on(Events.ShardError, (error, shardId) => {
+    console.error(`[Watchdog] Shard ${shardId} websocket error:`, error?.message ?? error);
+  });
+  client.on(Events.Invalidated, () => {
+    // discord.js will not recover from this — restart is the only fix.
+    console.error('[Watchdog] Session invalidated by Discord — exiting for restart.');
+    Deno.exit(1);
+  });
+
+  const watchdogTimer = setInterval(() => {
+    const staleMs = Date.now() - lastGatewayActivity;
+    if (staleMs > WATCHDOG_STALE_MS) {
+      console.error(`[Watchdog] No gateway heartbeat ACK for ${Math.round(staleMs / 1000)}s — gateway is wedged. Exiting for restart.`);
+      Deno.exit(1);
+    }
+  }, WATCHDOG_POLL_MS);
+  // Don't let the watchdog alone keep the process alive on graceful shutdown.
+  Deno.unrefTimer(watchdogTimer);
+
   // Login
   await client.login(discordToken);
   
