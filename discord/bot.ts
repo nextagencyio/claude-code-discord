@@ -82,7 +82,26 @@ export function convertMessageContent(content: MessageContent): any {
       description: f.description,
     }));
   }
-  
+
+  // Hoist a user mention found inside embed text up into the message content.
+  // Discord does NOT fire notifications for mentions inside embeds — only
+  // mentions in the plain `content` ping. So when Claude includes a <@id> in a
+  // reply to get the user's attention, surface it as content and scope
+  // allowedMentions to just those user IDs so it actually dings the phone
+  // (without risking @everyone / role pings).
+  if (!payload.content && content.embeds && content.embeds.length > 0) {
+    const ids = new Set<string>();
+    for (const e of content.embeds) {
+      const text = `${e.title ?? ''}\n${e.description ?? ''}`;
+      for (const m of text.matchAll(/<@!?(\d+)>/g)) ids.add(m[1]);
+    }
+    if (ids.size > 0) {
+      payload.content = [...ids].map((id) => `<@${id}>`).join(' ');
+      // deno-lint-ignore no-explicit-any
+      (payload as any).allowedMentions = { users: [...ids], parse: [] };
+    }
+  }
+
   return payload;
 }
 
