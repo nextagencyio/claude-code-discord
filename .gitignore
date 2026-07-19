@@ -92,3 +92,13 @@ agenthub/agents/youtube/db
 android-sdk/ 
 .aider*
 .playwright-mcp/
+
+# --- Stray local artifacts (keep private client work out of this public repo) ---
+# Root-level screenshots dumped by Claude Code sessions (chrome-extension/icons/*.png stay tracked)
+/*.png
+# Cloudflare Wrangler cache (contains account id)
+.wrangler/
+# Claude Code local session/config dir
+.claude/
+# Separate client project checkouts that happen to sit in this dir
+/decoupled-*/
