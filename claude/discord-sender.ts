@@ -47,6 +47,8 @@ const HIGH_SIGNAL_TOOLS = new Set([
   'Bash',                            // Shell commands
   'TodoWrite',                       // Task tracking
   'Task',                            // Sub-agent spawning
+  // Devin CLI tool names (lowercase) — surfaced via ATIF export streaming
+  'write', 'edit', 'exec', 'update_plan',
 ]);
 
 // Create sendClaudeMessages function with dependency injection

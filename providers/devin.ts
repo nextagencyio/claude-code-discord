@@ -3,6 +3,48 @@ import type { ClaudeMessage } from "../claude/types.ts";
 
 const SESSION_ID_PATTERN = /session[:\s]+([a-zA-Z0-9_-]+)/i;
 
+// Minimum interval between export-file polls (ms). The file is rewritten in
+// whole after each step, so polling too fast just burns CPU.
+const POLL_INTERVAL_MS = 1500;
+
+// deno-lint-ignore no-explicit-any
+interface AtifStep {
+  step_id: number;
+  source: string;
+  timestamp?: string;
+  message?: string;
+  reasoning_content?: string;
+  tool_calls?: Array<{
+    tool_call_id: string;
+    function_name: string;
+    // deno-lint-ignore no-explicit-any
+    arguments: Record<string, any>;
+  }>;
+  observation?: {
+    results: Array<{ source_call_id: string; content: string }>;
+  };
+  metrics?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    cached_tokens?: number;
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+interface AtifExport {
+  session_id?: string;
+  agent?: { model_name?: string };
+  steps?: AtifStep[];
+  final_metrics?: {
+    total_prompt_tokens?: number;
+    total_completion_tokens?: number;
+    total_cached_tokens?: number;
+    total_steps?: number;
+  };
+}
+
+// (Devin tool names are added to HIGH_SIGNAL_TOOLS in claude/discord-sender.ts)
+
 export class DevinProvider implements AIProvider {
   name = "devin";
   displayName = "Devin CLI";
@@ -21,7 +63,9 @@ export class DevinProvider implements AIProvider {
       args.push("--model", opts.modelOptions.model);
     }
 
-    // Use --export to capture session metadata
+    // --export writes an ATIF JSON file that is updated incrementally after
+    // each step. We poll it to stream intermediate progress (tool calls,
+    // plan updates) to Discord, and parse final_metrics for cost/duration.
     const exportPath = `${opts.workDir}/.devin-session-${Date.now()}.json`;
     args.push("--export", exportPath);
 
@@ -38,11 +82,13 @@ export class DevinProvider implements AIProvider {
     });
 
     const child = cmd.spawn();
+    const startTime = Date.now();
 
     const stderrChunks: string[] = [];
     const stdoutChunks: string[] = [];
     let sessionId: string | undefined;
-    let fullResponse = "";
+    let lastSeenStepId = 0;
+    let processExited = false;
 
     // Read stderr
     const stderrReader = child.stderr.getReader();
@@ -55,7 +101,6 @@ export class DevinProvider implements AIProvider {
         stderrChunks.push(text);
         console.error(`[Devin CLI stderr]: ${text}`);
 
-        // Try to extract session ID from stderr
         if (!sessionId) {
           const match = text.match(SESSION_ID_PATTERN);
           if (match) sessionId = match[1];
@@ -63,53 +108,45 @@ export class DevinProvider implements AIProvider {
       }
     })();
 
-    // Read stdout — stream line by line as text messages
+    // Read stdout — the final response text (print mode emits only the result)
     const stdoutReader = child.stdout.getReader();
     const stdoutPromise = (async () => {
       const decoder = new TextDecoder();
-      let buffer = "";
       while (true) {
         const { done, value } = await stdoutReader.read();
         if (done) break;
         const text = decoder.decode(value, { stream: true });
-        buffer += text;
         stdoutChunks.push(text);
-
-        // Emit complete lines as text messages
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.trim()) {
-            if (opts.onChunk) {
-              opts.onChunk(line + "\n");
-            }
-            if (opts.onMessage) {
-              const msg: ClaudeMessage = {
-                type: "text",
-                content: line,
-              };
-              opts.onMessage(msg);
-            }
-            // Try to extract session ID from stdout
-            if (!sessionId) {
-              const match = line.match(SESSION_ID_PATTERN);
-              if (match) sessionId = match[1];
-            }
-          }
-        }
       }
-      // Flush remaining buffer
-      if (buffer.trim()) {
-        if (opts.onChunk) {
-          opts.onChunk(buffer);
+    })();
+
+    // Poll the export file for new steps and stream them as ClaudeMessages.
+    // The file is rewritten in whole after each step, so we track the highest
+    // step_id we've already emitted and only send new ones. Stops when the
+    // process exits or the request is cancelled.
+    const pollPromise = (async () => {
+      while (!processExited && !opts.controller.signal.aborted) {
+        await sleep(POLL_INTERVAL_MS);
+        if (processExited || opts.controller.signal.aborted) break;
+
+        let exportData: AtifExport | null = null;
+        try {
+          const content = await Deno.readTextFile(exportPath);
+          exportData = JSON.parse(content) as AtifExport;
+        } catch {
+          // File doesn't exist yet or isn't valid JSON — try again next cycle
+          continue;
         }
-        if (opts.onMessage) {
-          const msg: ClaudeMessage = {
-            type: "text",
-            content: buffer,
-          };
-          opts.onMessage(msg);
+
+        if (!sessionId && exportData.session_id) {
+          sessionId = exportData.session_id;
+        }
+
+        const steps = exportData.steps || [];
+        for (const step of steps) {
+          if (step.step_id <= lastSeenStepId) continue;
+          lastSeenStepId = step.step_id;
+          this.emitStep(step, opts);
         }
       }
     })();
@@ -119,7 +156,12 @@ export class DevinProvider implements AIProvider {
     let status: Deno.CommandStatus;
     try {
       [status] = await Promise.all([statusPromise, stdoutPromise, stderrPromise]);
+      processExited = true;
+      // Let the poll loop see the flag and exit; don't await it (it may be
+      // mid-sleep). The final flush below catches any steps it missed.
+      pollPromise.catch(() => {});
     } catch (error) {
+      processExited = true;
       if (opts.controller.signal.aborted || (error as Error).name === "AbortError") {
         try { child.kill("SIGTERM"); } catch { /* already exited */ }
         return { response: "Request was cancelled", sessionId, modelUsed: opts.modelOptions?.model || "Default" };
@@ -127,17 +169,54 @@ export class DevinProvider implements AIProvider {
       throw error;
     }
 
-    fullResponse = stdoutChunks.join("");
+    // Final flush: read the export file one last time to catch any steps
+    // emitted between the last poll and process exit, plus final_metrics.
+    let cost: number | undefined;
+    let duration: number | undefined;
+    let modelUsed = opts.modelOptions?.model || "Default";
 
-    // Try to parse session ID from export file
-    if (!sessionId) {
-      try {
-        const exportContent = await Deno.readTextFile(exportPath);
-        const exportData = JSON.parse(exportContent);
-        sessionId = exportData.session_id || exportData.sessionId || exportData.id;
-      } catch {
-        // Export file may not exist or may not be JSON
+    try {
+      const exportContent = await Deno.readTextFile(exportPath);
+      const exportData = JSON.parse(exportContent) as AtifExport;
+
+      if (!sessionId) sessionId = exportData.session_id;
+      if (exportData.agent?.model_name) modelUsed = exportData.agent.model_name;
+
+      // Emit any steps we haven't seen yet
+      const steps = exportData.steps || [];
+      for (const step of steps) {
+        if (step.step_id <= lastSeenStepId) continue;
+        lastSeenStepId = step.step_id;
+        this.emitStep(step, opts);
       }
+
+      // Parse duration from step timestamps (first to last)
+      if (steps.length >= 2) {
+        const firstStep = steps[0];
+        const lastStep = steps[steps.length - 1];
+        try {
+          const firstTs = new Date(firstStep?.timestamp || "").getTime();
+          const lastTs = new Date(lastStep?.timestamp || "").getTime();
+          if (firstTs && lastTs) duration = lastTs - firstTs;
+        } catch { /* timestamps unavailable */ }
+      }
+      duration = duration ?? (Date.now() - startTime);
+
+      // Cost: Devin doesn't expose dollar amounts in the export, only token
+      // counts. We log token usage for observability; a real $ cost would
+      // require pricing tables per model, which change frequently — left as
+      // a future enhancement.
+      const metrics = exportData.final_metrics;
+      if (metrics) {
+        const totalTokens = (metrics.total_prompt_tokens || 0) +
+          (metrics.total_completion_tokens || 0) +
+          (metrics.total_cached_tokens || 0);
+        if (totalTokens > 0) {
+          console.log(`[Devin] Token usage: ${totalTokens} (prompt: ${metrics.total_prompt_tokens}, completion: ${metrics.total_completion_tokens}, cached: ${metrics.total_cached_tokens})`);
+        }
+      }
+    } catch {
+      // Export file may not exist or may not be JSON
     }
 
     // Clean up export file
@@ -147,6 +226,8 @@ export class DevinProvider implements AIProvider {
       // File may not exist
     }
 
+    const fullResponse = stdoutChunks.join("");
+
     if (!status.success && !opts.controller.signal.aborted) {
       const stderrOutput = stderrChunks.join("");
       throw new Error(`Devin CLI exited with code ${status.code}. stderr: ${stderrOutput.substring(0, 1000)}`);
@@ -155,15 +236,71 @@ export class DevinProvider implements AIProvider {
     return {
       response: fullResponse || "No response received",
       sessionId,
-      modelUsed: opts.modelOptions?.model || "Default",
+      cost,
+      duration,
+      modelUsed,
       stderrOutput: stderrChunks.join(""),
     };
   }
 
+  /**
+   * Convert a single ATIF step into ClaudeMessage(s) and emit via callbacks.
+   * Devin tool names are passed through as-is; the Discord sender's generic
+   * "Tool: <name>" rendering handles them (high-signal Devin tools are added
+   * to HIGH_SIGNAL_TOOLS in the sender).
+   */
+  private emitStep(step: AtifStep, opts: PromptOptions): void {
+    // Agent steps with tool calls → tool_use messages
+    if (step.tool_calls && step.tool_calls.length > 0) {
+      for (const tc of step.tool_calls) {
+        const msg: ClaudeMessage = {
+          type: "tool_use",
+          content: "",
+          metadata: {
+            name: tc.function_name,
+            input: tc.arguments,
+          },
+        };
+        opts.onMessage?.(msg);
+        opts.onChunk?.(`[Tool: ${tc.function_name}]\n`);
+      }
+    }
+
+    // Tool results → tool_result (sender skips these, but emit for completeness)
+    if (step.observation?.results && step.observation.results.length > 0) {
+      for (const result of step.observation.results) {
+        const msg: ClaudeMessage = {
+          type: "tool_result",
+          content: result.content,
+        };
+        opts.onMessage?.(msg);
+      }
+    }
+
+    // Thinking/reasoning → thinking (sender skips these)
+    if (step.reasoning_content && step.reasoning_content.trim()) {
+      const msg: ClaudeMessage = {
+        type: "thinking",
+        content: step.reasoning_content,
+      };
+      opts.onMessage?.(msg);
+    }
+
+    // Final text response → text message
+    if (step.message && step.message.trim() && step.source === "agent") {
+      const msg: ClaudeMessage = {
+        type: "text",
+        content: step.message,
+      };
+      opts.onMessage?.(msg);
+      opts.onChunk?.(step.message + "\n");
+    }
+  }
+
   // Curated set of common Devin model aliases. Devin supports hundreds of
   // model variants (run `devin models list` for the full set); these short
-  // aliases always resolve to the latest version in each family and cover the
-  // vast majority of use-cases. Any string Devin accepts on `--model` works,
+  // aliases always resolve to the latest version in each family and cover
+  // the vast majority of use-cases. Any string Devin accepts on `--model` works,
   // so users can type a full model ID (e.g. `glm-5-2-max`) even if not listed.
   static readonly COMMON_MODELS: ModelInfo[] = [
     { id: "adaptive", name: "Adaptive", description: "Intelligent model router — auto-selects the best model per task (recommended)", contextWindow: 0, recommended: true },
@@ -190,4 +327,8 @@ export class DevinProvider implements AIProvider {
       return false;
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

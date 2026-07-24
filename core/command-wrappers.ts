@@ -62,7 +62,7 @@ export interface CommandWrapperDeps {
   /** Get the global default model (from unified settings) */
   getGlobalDefaultModel?: () => string | undefined;
   /** Look up a provider by name (for listing its models) */
-  getProvider?: (name: string) => { listModels?: () => Promise<{ id: string; name: string; description: string; recommended?: boolean }[]> } | undefined;
+  getProvider?: (name: string) => { listModels?: () => Promise<{ id: string; name: string; description: string; recommended?: boolean }[]>; isAvailable?: () => Promise<boolean> } | undefined;
 }
 
 // ================================
@@ -423,12 +423,21 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
 
       switch (action) {
         case "list": {
+          // Check availability of each provider (async)
+          const availability: Record<string, boolean> = {};
+          for (const name of available) {
+            const provider = deps.getProvider?.(name);
+            availability[name] = provider?.isAvailable ? await provider.isAvailable() : true;
+          }
+
           const providerList = available.map((name) => {
             const isCurrent = name === current;
             const isDefault = name === defaultName;
+            const isAvailable = availability[name];
             const markers = [
               isCurrent ? "✅ current" : "",
               isDefault ? "⭐ default" : "",
+              isAvailable ? "" : "⚠️ not installed",
             ].filter(Boolean).join(" | ");
             return `**${name}**${markers ? ` — ${markers}` : ""}`;
           }).join("\n");
@@ -474,8 +483,25 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
             break;
           }
 
+          // Warn if the provider's CLI isn't installed/authenticated, but
+          // still switch — the user may install the CLI after switching.
+          const provider = deps.getProvider?.(name);
+          const isAvailable = provider?.isAvailable ? await provider.isAvailable() : true;
+
           if (deps.setChannelProvider) {
             deps.setChannelProvider(name);
+          }
+
+          if (!isAvailable) {
+            await ctx.reply({
+              embeds: [{
+                color: 0xffaa00,
+                title: "Provider Switched (with warning)",
+                description: `This channel will now use **${name}**, but its CLI doesn't appear to be installed or authenticated. Messages will fail until the CLI is available.\nRun \`/provider list\` to check status.`,
+                timestamp: true,
+              }],
+            });
+            break;
           }
 
           await ctx.reply({
