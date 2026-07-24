@@ -53,14 +53,31 @@ export class DevinProvider implements AIProvider {
     try {
       return await this.runDevin(opts);
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+
       // If Devin rejects the model ID (e.g. a Claude-specific ID like
       // "claude-opus-4-8" was passed to Devin which expects "claude-opus-4.8"),
       // retry once without --model so the request still succeeds.
-      const msg = error instanceof Error ? error.message : String(error);
       if (msg.includes("Unknown model") && opts.modelOptions?.model) {
         console.warn(`[Devin] Model "${opts.modelOptions.model}" rejected, retrying without --model`);
         return await this.runDevin({ ...opts, modelOptions: undefined });
       }
+
+      // If the session is locked by another process (e.g. an interactive
+      // `devin` session the user opened on the host), resume (-r) will panic.
+      // Fall back to a fresh session so the bot still responds. The old session
+      // ID is cleared so future messages continue in the new session.
+      if (msg.includes("already open in another process") && opts.sessionId) {
+        console.warn(`[Devin] Session "${opts.sessionId}" is locked by another process, starting a fresh session`);
+        opts.onMessage?.({
+          type: 'text',
+          content: `Session "${opts.sessionId}" is open in another process — starting a fresh session (previous context lost).`,
+        });
+        const result = await this.runDevin({ ...opts, sessionId: undefined });
+        // Persist the new session ID by returning it; the caller saves it.
+        return result;
+      }
+
       throw error;
     }
   }

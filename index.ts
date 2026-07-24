@@ -587,7 +587,15 @@ export async function createClaudeCodeBot(config: BotConfig) {
               });
             }
           } : undefined,
-          modelOptions: (session.modelName || settingsOps.getSettings().unified.defaultModel) ? { model: session.modelName || settingsOps.getSettings().unified.defaultModel } : undefined,
+          // The unified defaultModel is a Claude Code model ID (e.g.
+          // "claude-opus-4-8") and is not valid for other providers like Devin.
+          // Only apply it for the claude-code provider; other providers use the
+          // per-channel override (session.modelName) or let the provider choose.
+          modelOptions: (() => {
+            const effectiveModel = session.modelName ||
+              (provider.name === "claude-code" ? settingsOps.getSettings().unified.defaultModel : undefined);
+            return effectiveModel ? { model: effectiveModel } : undefined;
+          })(),
           workspaceRootDir: workDir,
           mcpServers: session.mcpServers,
         });
@@ -611,7 +619,18 @@ export async function createClaudeCodeBot(config: BotConfig) {
 
       saveSessionState();
     } catch (error) {
-      console.error(`[processMessage] Unhandled error in channel ${channelId}:`, error instanceof Error ? error.message : String(error));
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[processMessage] Unhandled error in channel ${channelId}:`, errMsg);
+      // Surface the error in Discord so the user isn't left staring at a
+      // "Running..." embed with no follow-up.
+      await ctx.reply({
+        embeds: [{
+          color: 0xff0000,
+          title: 'Error',
+          description: `\`\`\`\n${errMsg.substring(0, 1900)}\n\`\`\``,
+          timestamp: true,
+        }],
+      }).catch(() => {});
     } finally {
       // ALWAYS clear the controller so the channel doesn't stay "busy" forever,
       // and release the global slot for the next waiting channel.
