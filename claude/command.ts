@@ -48,6 +48,12 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       const defaultModel = deps.getDefaultModel?.();
       let streamMessageCount = 0;
 
+      // Serialize Discord sends so messages from successive stream events
+      // don't interleave. Without this, multiple onStreamJson callbacks fire
+      // in quick succession and their send() calls race each other to the
+      // Discord API, producing jumbled/out-of-order messages.
+      let sendChain: Promise<void> = Promise.resolve();
+
       // Race the SDK call against a hard 30-second timeout
       // (controller.abort() alone may not break a blocking iterator)
       const STARTUP_TIMEOUT_MS = 30000;
@@ -80,9 +86,12 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           // Process JSON stream data and send to Discord
           const claudeMessages = convertToClaudeMessages(jsonData);
           if (claudeMessages.length > 0) {
-            send(claudeMessages).catch((err) => {
-              console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
-            });
+            // Chain onto the previous send so messages arrive in order
+            sendChain = sendChain
+              .then(() => send(claudeMessages))
+              .catch((err) => {
+                console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
+              });
           }
         },
         false, // continueMode = false
@@ -101,6 +110,9 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           deps.setClaudeSessionId(result.sessionId);
           deps.setClaudeController(null);
         }
+
+        // Wait for all queued stream sends to flush before sending completion
+        await sendChain;
 
         // Send completion message with interactive buttons
         if (result.sessionId) {
@@ -206,6 +218,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       await ctx.editReply({ embeds: [embedData] });
 
       const continueDefaultModel = deps.getDefaultModel?.();
+      let continueSendChain: Promise<void> = Promise.resolve();
       const result = await sendToClaudeCode(
         currentWorkDir,
         actualPrompt,
@@ -216,15 +229,20 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           // Process JSON stream data and send to Discord
           const claudeMessages = convertToClaudeMessages(jsonData);
           if (claudeMessages.length > 0) {
-            sendClaudeMessages(claudeMessages).catch((err) => {
-              console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
-            });
+            continueSendChain = continueSendChain
+              .then(() => sendClaudeMessages(claudeMessages))
+              .catch((err) => {
+                console.error('[Claude sender error]:', err instanceof Error ? err.message : String(err));
+              });
           }
         },
         true, // continueMode = true
         continueDefaultModel ? { model: continueDefaultModel } : undefined,
         deps.workspaceRootDir
       );
+
+      // Wait for all queued stream sends to flush before sending completion
+      await continueSendChain;
 
       deps.setClaudeSessionId(result.sessionId);
       deps.setClaudeController(null);
