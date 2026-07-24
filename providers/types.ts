@@ -31,6 +31,11 @@ export interface ProviderResult {
   duration?: number;
   modelUsed?: string;
   stderrOutput?: string;
+  tokenUsage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    cachedTokens?: number;
+  };
 }
 
 export interface AIProvider {

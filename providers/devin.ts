@@ -214,6 +214,7 @@ export class DevinProvider implements AIProvider {
     let cost: number | undefined;
     let duration: number | undefined;
     let modelUsed = opts.modelOptions?.model || "Default";
+    let tokenUsage: { promptTokens?: number; completionTokens?: number; cachedTokens?: number } | undefined;
 
     try {
       const exportContent = await Deno.readTextFile(exportPath);
@@ -242,17 +243,18 @@ export class DevinProvider implements AIProvider {
       }
       duration = duration ?? (Date.now() - startTime);
 
-      // Cost: Devin doesn't expose dollar amounts in the export, only token
-      // counts. We log token usage for observability; a real $ cost would
-      // require pricing tables per model, which change frequently — left as
-      // a future enhancement.
+      // Token usage from final_metrics. Devin doesn't expose dollar amounts
+      // in the export, only token counts — we surface those to Discord so the
+      // user has visibility without a pricing table (which changes frequently).
       const metrics = exportData.final_metrics;
       if (metrics) {
-        const totalTokens = (metrics.total_prompt_tokens || 0) +
-          (metrics.total_completion_tokens || 0) +
-          (metrics.total_cached_tokens || 0);
+        const prompt = metrics.total_prompt_tokens || 0;
+        const completion = metrics.total_completion_tokens || 0;
+        const cached = metrics.total_cached_tokens || 0;
+        const totalTokens = prompt + completion + cached;
         if (totalTokens > 0) {
-          console.log(`[Devin] Token usage: ${totalTokens} (prompt: ${metrics.total_prompt_tokens}, completion: ${metrics.total_completion_tokens}, cached: ${metrics.total_cached_tokens})`);
+          tokenUsage = { promptTokens: prompt, completionTokens: completion, cachedTokens: cached };
+          console.log(`[Devin] Token usage: ${totalTokens} (prompt: ${prompt}, completion: ${completion}, cached: ${cached})`);
         }
       }
     } catch {
@@ -280,6 +282,7 @@ export class DevinProvider implements AIProvider {
       duration,
       modelUsed,
       stderrOutput: stderrChunks.join(""),
+      tokenUsage,
     };
   }
 

@@ -107,8 +107,54 @@ export function createClaudeSender(sender: DiscordSender) {
           break;
         }
 
+        if (msg.metadata?.subtype === 'completion') {
+          const model = msg.metadata.model || 'Default';
+          const durationMs = msg.metadata.duration_ms as number | undefined;
+          const cost = msg.metadata.total_cost_usd as number | undefined;
+          const tokens = msg.metadata.token_usage as
+            { promptTokens?: number; completionTokens?: number; cachedTokens?: number } | undefined;
+
+          const fields: Array<{ name: string; value: string; inline: boolean }> = [
+            { name: 'Model', value: model, inline: true },
+          ];
+
+          if (durationMs !== undefined && durationMs > 0) {
+            const secs = durationMs / 1000;
+            fields.push({ name: 'Duration', value: secs >= 60 ? `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s` : `${secs.toFixed(1)}s`, inline: true });
+          }
+
+          if (cost !== undefined && cost > 0) {
+            fields.push({ name: 'Cost', value: `$${cost.toFixed(4)}`, inline: true });
+          }
+
+          if (tokens) {
+            const parts: string[] = [];
+            if (tokens.promptTokens) parts.push(`in ${tokens.promptTokens.toLocaleString()}`);
+            if (tokens.completionTokens) parts.push(`out ${tokens.completionTokens.toLocaleString()}`);
+            if (tokens.cachedTokens) parts.push(`cached ${tokens.cachedTokens.toLocaleString()}`);
+            if (parts.length > 0) {
+              fields.push({ name: 'Tokens', value: parts.join(' · '), inline: false });
+            }
+          }
+
+          if (msg.metadata.session_id) {
+            const sid = String(msg.metadata.session_id);
+            fields.push({ name: 'Session', value: `\`${sid.substring(0, 12)}\``, inline: false });
+          }
+
+          await sender.sendMessage({
+            embeds: [{
+              color: 0x2ecc71,
+              title: 'Run stats',
+              fields,
+              timestamp: true,
+            }]
+          });
+          break;
+        }
+
         // Skip all other system messages (init, hook_started, hook_response,
-        // completion, thinking_tokens, ...) — noise in the channel
+        // thinking_tokens, ...) — noise in the channel
         break;
       }
 

@@ -612,6 +612,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
             model: result.modelUsed || 'Default',
             total_cost_usd: result.cost,
             duration_ms: result.duration,
+            token_usage: result.tokenUsage,
             cwd: session.channelWorkDir,
           },
         }]).catch(() => {});
