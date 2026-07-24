@@ -27,10 +27,10 @@ A Discord bot that gives you a conversational interface to AI coding agents like
 |---------|-------------|
 | `/new` | Clear session and start fresh in the current channel |
 | `/cancel` | Cancel the currently running AI session |
-| `/model` | Quick model switch |
-| `/status` | Show current session info, provider, working directory, and run state |
+| `/model` | Switch or list AI models for this channel's provider (free-text, per-channel) |
+| `/status` | Show current session info, provider, model, working directory, and run state |
 | `/browser` | Manage Chrome CDP connection for authenticated browser control |
-| `/provider` | Switch or check the AI provider for this channel |
+| `/provider` | Switch or check the AI provider for this channel (checks CLI availability) |
 
 ### Claude Integration
 
@@ -184,9 +184,12 @@ AI responses stream to Discord in real-time as embedded messages:
 ### Multi-Provider Support
 The bot supports multiple AI CLI backends:
 - **Claude Code** — Full streaming JSON output, sub-agent heartbeats, session resume
-- **Devin CLI** — Non-interactive mode (`devin -p`) with stdout streaming
+- **Devin CLI** — Non-interactive mode (`devin -p`) with ATIF export polling for real-time streaming of tool calls, plan updates, and thinking steps. Session ID, duration, and token usage are parsed from the export file.
 
-Use `/provider set name:devin` to switch a channel to Devin, or `/provider list` to see available providers. The default provider is set via `DEFAULT_PROVIDER` in `.env`.
+Use `/provider set name:devin` to switch a channel to Devin, or `/provider list` to see available providers (with CLI availability checks). The default provider is set via `DEFAULT_PROVIDER` in `.env`.
+
+### Per-Channel Model Selection
+Each channel stores its own model override via `/model model:<id>`. Run `/model` with no argument to list the curated models for the channel's active provider. Model IDs are provider-specific (a Claude ID won't work for Devin and vice-versa), so the model is stored per-channel. Any model ID the provider accepts works — for Devin, run `devin models list` to see all 35+ families.
 
 ### Rate Limit Fallback
 If the primary model hits a rate limit, the bot automatically retries with Claude Sonnet 4 (Claude Code provider only).
