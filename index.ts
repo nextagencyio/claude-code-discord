@@ -451,6 +451,75 @@ export async function createClaudeCodeBot(config: BotConfig) {
     }
   }
 
+  // ================================
+  // Vision Bridge for non-Claude providers
+  // ================================
+
+  /**
+   * When a non-Claude provider (e.g. Devin) receives a prompt with image
+   * attachments, it can't see the images — only the text prompt. This
+   * function detects `[Attached image: /path]` references in the prompt,
+   * uses `claude -p` (which has vision via the Claude Code CLI) to describe
+   * each image, and replaces the references with rich text descriptions.
+   *
+   * For Claude Code, this is a no-op — Claude can read the files directly.
+   */
+  async function describeImagesForProvider(prompt: string, providerName: string): Promise<string> {
+    // Claude Code can read image files from disk directly — no bridge needed.
+    if (providerName === "claude-code") return prompt;
+
+    // Find all [Attached image: /path] references
+    const imagePattern = /\[Attached image: ([^\]]+)\]/g;
+    const matches = [...prompt.matchAll(imagePattern)];
+    if (matches.length === 0) return prompt;
+
+    console.log(`[Vision Bridge] Describing ${matches.length} image(s) via claude -p for provider "${providerName}"`);
+
+    const claudePath = Deno.env.get("CLAUDE_PATH") || "claude";
+    let modifiedPrompt = prompt;
+
+    for (const match of matches) {
+      const fullRef = match[0];
+      const imagePath = match[1].trim();
+
+      try {
+        // Use claude -p in print mode with a vision-capable model to describe
+        // the image. Haiku is fast and cheap for simple image description.
+        const describeCmd = new Deno.Command(claudePath, {
+          args: [
+            "-p",
+            "--model", "claude-haiku-4-5",
+            "--output-format", "text",
+            `Look at the image at ${imagePath} and provide a detailed description. Include: what the image shows, any text visible in the image, layout/structure if it's a screenshot or diagram, colors, and any notable details. Be thorough but concise.`,
+          ],
+          stdout: "piped",
+          stderr: "piped",
+        });
+
+        console.log(`[Vision Bridge] Describing: ${imagePath}`);
+        const { success, stdout, stderr } = await describeCmd.output();
+
+        if (success) {
+          const description = new TextDecoder().decode(stdout).trim();
+          if (description) {
+            const replacement = `[Attached image: ${imagePath}]\n[Image description: ${description}]`;
+            modifiedPrompt = modifiedPrompt.replace(fullRef, replacement);
+            console.log(`[Vision Bridge] Got description (${description.length} chars) for ${imagePath}`);
+            continue;
+          }
+        }
+
+        // If claude failed, log and leave the original reference
+        const stderrText = new TextDecoder().decode(stderr).trim();
+        console.warn(`[Vision Bridge] claude -p failed for ${imagePath}: ${stderrText.substring(0, 200)}`);
+      } catch (error) {
+        console.warn(`[Vision Bridge] Error describing ${imagePath}:`, error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    return modifiedPrompt;
+  }
+
   // Process a single message (and drain the queue after)
   async function processMessage(channelId: string, session: ChannelSession, ctx: InteractionContext, prompt: string) {
     messageHistoryOps.addToHistory(prompt);
@@ -486,6 +555,11 @@ export async function createClaudeCodeBot(config: BotConfig) {
         session.sessionId = result.sessionId;
       } else {
         // Generic provider path — uses provider.sendPrompt() with onMessage callback
+
+        // Vision bridge: non-Claude providers can't see images. Use claude -p
+        // to describe any attached images and inject the text descriptions.
+        prompt = await describeImagesForProvider(prompt, provider.name);
+
         await ctx.reply({
           embeds: [{
             color: 0xffff00,
