@@ -160,6 +160,13 @@ export class DevinProvider implements AIProvider {
       // Let the poll loop see the flag and exit; don't await it (it may be
       // mid-sleep). The final flush below catches any steps it missed.
       pollPromise.catch(() => {});
+
+      // If the request was cancelled, the child was killed by the signal and
+      // Promise.all resolves normally (streams close on kill). Detect that
+      // here rather than relying on the catch path.
+      if (opts.controller.signal.aborted) {
+        return { response: "Request was cancelled", sessionId, modelUsed: opts.modelOptions?.model || "Default" };
+      }
     } catch (error) {
       processExited = true;
       if (opts.controller.signal.aborted || (error as Error).name === "AbortError") {
