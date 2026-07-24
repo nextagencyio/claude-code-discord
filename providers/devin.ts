@@ -268,9 +268,9 @@ export class DevinProvider implements AIProvider {
 
   /**
    * Convert a single ATIF step into ClaudeMessage(s) and emit via callbacks.
-   * Devin tool names are passed through as-is; the Discord sender's generic
-   * "Tool: <name>" rendering handles them (high-signal Devin tools are added
-   * to HIGH_SIGNAL_TOOLS in the sender).
+   * Devin tool names are passed through as-is. The Discord sender drops
+   * tool_use messages entirely, so these surface only to onChunk/onMessage
+   * consumers such as devin_test.ts.
    */
   private emitStep(step: AtifStep, opts: PromptOptions): void {
     // Agent steps with tool calls → tool_use messages

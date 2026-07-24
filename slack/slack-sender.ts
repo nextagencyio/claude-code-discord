@@ -1,9 +1,10 @@
 /**
  * slack-sender.ts — a `DiscordSender` implementation that posts into a Slack
  * thread. This lets the Slack agent REUSE the whole transport-agnostic
- * `createClaudeSender` formatting logic (the high-signal tool allowlist,
- * Edit/Write/Todo rendering, truncation) and only translate the resulting
- * `MessageContent` (Discord embeds) into Slack Block Kit sections.
+ * `createClaudeSender` formatting logic (assistant text, image attachments)
+ * and only translate the resulting `MessageContent` (Discord embeds) into
+ * Slack Block Kit sections. Note that sender drops all tool_use messages, so
+ * the Slack thread carries conversation only — same as Discord.
  */
 import type { DiscordSender } from "../claude/index.ts";
 import type { MessageContent, EmbedData } from "../discord/types.ts";

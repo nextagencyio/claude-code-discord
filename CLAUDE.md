@@ -43,7 +43,7 @@ core/button-handlers.ts    — Expand/collapse buttons for truncated embed conte
 - **Session persistence:** Session IDs, provider name, and model name are saved to `WORK_DIR/.claude-sessions.json` so they survive bot restarts.
 - **Message queuing:** Messages sent while the AI is busy are queued and processed sequentially after the current task finishes.
 - **Image support:** Discord image attachments are downloaded, resized (max 1500px via `sips` on macOS / `convert` on Linux), and referenced in the prompt.
-- **Streaming output:** AI responses stream to Discord as color-coded embeds (green=text, blue=tool use, cyan=tool result, purple=thinking, orange=edits).
+- **Streaming output:** AI responses stream to Discord as green assistant-text embeds. Tool invocations, tool results, thinking blocks, and most system messages are deliberately dropped in `claude/discord-sender.ts` — the channel carries conversation, not mechanics. The only tool that still renders is a `Read` of an image file, which attaches the image itself.
 - **Rate limit fallback:** If the primary model hits a rate limit, the bot retries with Claude Sonnet 4 (Claude Code provider only).
 
 ## Dependencies
