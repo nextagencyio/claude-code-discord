@@ -492,6 +492,13 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
             deps.setChannelProvider(name);
           }
 
+          // Clear the per-channel model override — model IDs are provider-specific
+          // (e.g. Claude's "claude-opus-4-8" is invalid for Devin which uses
+          // "claude-opus-4.8"). The user should /model to pick a new one.
+          if (deps.setChannelModel) {
+            deps.setChannelModel(undefined);
+          }
+
           if (!isAvailable) {
             await ctx.reply({
               embeds: [{
@@ -508,7 +515,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
             embeds: [{
               color: 0x00ff00,
               title: "Provider Switched",
-              description: `This channel will now use **${name}** as its AI provider.\nUse \`/new\` to start a fresh session with the new provider.`,
+              description: `This channel will now use **${name}** as its AI provider.\nThe model override was cleared (model IDs are provider-specific). Use \`/model\` to pick a model, then \`/new\` to start a fresh session.`,
               timestamp: true,
             }],
           });

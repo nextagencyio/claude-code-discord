@@ -50,6 +50,22 @@ export class DevinProvider implements AIProvider {
   displayName = "Devin CLI";
 
   async sendPrompt(opts: PromptOptions): Promise<ProviderResult> {
+    try {
+      return await this.runDevin(opts);
+    } catch (error) {
+      // If Devin rejects the model ID (e.g. a Claude-specific ID like
+      // "claude-opus-4-8" was passed to Devin which expects "claude-opus-4.8"),
+      // retry once without --model so the request still succeeds.
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("Unknown model") && opts.modelOptions?.model) {
+        console.warn(`[Devin] Model "${opts.modelOptions.model}" rejected, retrying without --model`);
+        return await this.runDevin({ ...opts, modelOptions: undefined });
+      }
+      throw error;
+    }
+  }
+
+  private async runDevin(opts: PromptOptions): Promise<ProviderResult> {
     const devinPath = Deno.env.get("DEVIN_PATH") || "devin";
     const args: string[] = ["-p", "--permission-mode", "bypass"];
 
