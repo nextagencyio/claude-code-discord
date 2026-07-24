@@ -540,14 +540,14 @@ async function handleModeSettings(ctx: any, settings: UnifiedBotSettings, update
 
 async function handleClaudeSettings(ctx: any, settings: UnifiedBotSettings, updateSettings: any, action?: string, value?: string) {
   // Implementation for Claude settings management
-  // NOTE: Only model, system prompt, and context options are supported by Claude Code CLI
+  // NOTE: Only model, system prompt, and context options are supported by the AI CLI
   // Temperature and maxTokens are NOT supported
   if (!action) {
     await ctx.editReply({
       embeds: [{
         color: 0x0099ff,
         title: '🧠 Claude Settings',
-        description: 'Available actions: `set-model`, `toggle-git-context`, `toggle-system-info`, `set-system-prompt`\n\n*Note: Only model and context options are supported by Claude Code CLI*',
+        description: 'Available actions: `set-model`, `toggle-git-context`, `toggle-system-info`, `set-system-prompt`\n\n*Note: Only model and context options are supported by the AI CLI*',
         fields: [{
           name: 'Current Settings',
           value: `Model: ${settings.defaultModel}\nAuto Git Context: ${settings.autoIncludeGitContext ? 'On' : 'Off'}\nAuto System Info: ${settings.autoIncludeSystemInfo ? 'On' : 'Off'}\nSystem Prompt: ${settings.defaultSystemPrompt ? 'Set' : 'Not set'}`,

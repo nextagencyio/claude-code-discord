@@ -47,6 +47,22 @@ export interface CommandWrapperDeps {
   setChannelMcpServers?: (servers: Record<string, any> | undefined) => void;
   /** Cleanup interval ID */
   cleanupInterval: number;
+  /** Get the provider name for the active channel */
+  getChannelProvider?: () => string | undefined;
+  /** Set the provider name for the active channel */
+  setChannelProvider?: (name: string | undefined) => void;
+  /** Get the default provider name */
+  getDefaultProviderName?: () => string;
+  /** Get list of available provider names */
+  getAvailableProviderNames?: () => string[];
+  /** Get the model override for the active channel */
+  getChannelModel?: () => string | undefined;
+  /** Set the model override for the active channel */
+  setChannelModel?: (model: string | undefined) => void;
+  /** Get the global default model (from unified settings) */
+  getGlobalDefaultModel?: () => string | undefined;
+  /** Look up a provider by name (for listing its models) */
+  getProvider?: (name: string) => { listModels?: () => Promise<{ id: string; name: string; description: string; recommended?: boolean }[]> } | undefined;
 }
 
 // ================================
@@ -58,7 +74,7 @@ export interface CommandWrapperDeps {
  */
 export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandlers {
   const { handlers, getClaudeController, getClaudeSessionId } = deps;
-  const { claude: claudeHandlers, advancedSettings: advancedSettingsHandlers } = handlers;
+  const { claude: claudeHandlers } = handlers;
 
   // Helper: set active channel from ctx before running handler logic
   function setChannel(ctx: InteractionContext) {
@@ -99,9 +115,9 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
       const cancelled = claudeHandlers.onClaudeCancel(ctx);
       const cleared = deps.clearChannelQueue ? deps.clearChannelQueue() : 0;
       const parts: string[] = [];
-      if (cancelled) parts.push("Claude Code session cancelled.");
+      if (cancelled) parts.push("AI Bot session cancelled.");
       if (cleared > 0) parts.push(`${cleared} queued message(s) cleared.`);
-      if (!cancelled && cleared === 0) parts.push("No running Claude Code session in this channel.");
+      if (!cancelled && cleared === 0) parts.push("No running AI Bot session in this channel.");
       await ctx.reply({
         embeds: [{
           color: (cancelled || cleared > 0) ? 0xff0000 : 0x808080,
@@ -113,12 +129,75 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     },
   });
 
-  // /model - Quick model switch
+  // /model - Switch or list models for the active channel's provider
+  // Free-text input (no static choices) because model IDs differ across
+  // providers and Discord caps choices at 25. Called with no argument, lists
+  // the models available to the channel's current provider.
   commandHandlers.set("model", {
     execute: async (ctx: InteractionContext) => {
       setChannel(ctx);
-      const model = ctx.getString("model", true)!;
-      await advancedSettingsHandlers.onQuickModel(ctx, model);
+      const providerName = deps.getChannelProvider?.() || deps.getDefaultProviderName?.() || "claude-code";
+      const model = ctx.getString("model"); // optional now
+
+      // No argument → list models for the active provider
+      if (!model) {
+        const provider = deps.getProvider?.(providerName);
+        const models = provider?.listModels ? await provider.listModels() : [];
+        const currentModel = deps.getChannelModel?.() || deps.getGlobalDefaultModel?.() || "default";
+
+        if (models.length === 0) {
+          await ctx.reply({
+            embeds: [{
+              color: 0x0099ff,
+              title: `Models for ${providerName}`,
+              description: "No model list available for this provider.\nUse `/model model:<id>` to set any model ID the provider accepts.",
+              fields: [
+                { name: "Current", value: `\`${currentModel}\``, inline: true },
+              ],
+              timestamp: true,
+            }],
+          });
+          return;
+        }
+
+        const modelList = models.map((m) => {
+          const marker = m.id === currentModel ? "✅ " : (m.recommended ? "⭐ " : "");
+          return `${marker}**${m.name}** (\`${m.id}\`)\n${m.description}`;
+        }).join("\n\n");
+
+        await ctx.reply({
+          embeds: [{
+            color: 0x0099ff,
+            title: `Models for ${providerName}`,
+            description: modelList,
+            fields: [
+              { name: "Current", value: `\`${currentModel}\``, inline: true },
+              { name: "Provider", value: `\`${providerName}\``, inline: true },
+            ],
+            footer: { text: "Use /model model:<id> to switch. Any ID the provider accepts works." },
+            timestamp: true,
+          }],
+        });
+        return;
+      }
+
+      // Set the model for this channel
+      if (deps.setChannelModel) {
+        deps.setChannelModel(model);
+      }
+
+      await ctx.reply({
+        embeds: [{
+          color: 0x00ff00,
+          title: "Model Switched",
+          description: `This channel will now use **\`${model}\`** with the **${providerName}** provider.\nUse \`/new\` to start a fresh session with the new model.`,
+          fields: [
+            { name: "Model", value: `\`${model}\``, inline: true },
+            { name: "Provider", value: `\`${providerName}\``, inline: true },
+          ],
+          timestamp: true,
+        }],
+      });
     },
   });
 
@@ -130,6 +209,8 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
       const controller = getClaudeController();
       const isRunning = controller !== null && !controller.signal.aborted;
       const channelWorkDir = deps.getClaudeWorkDir ? deps.getClaudeWorkDir() : "Unknown";
+      const providerName = deps.getChannelProvider?.() || deps.getDefaultProviderName?.() || "claude-code";
+      const modelName = deps.getChannelModel?.() || deps.getGlobalDefaultModel?.() || "default";
 
       await ctx.reply({
         embeds: [{
@@ -142,6 +223,8 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
               inline: true,
             },
             { name: "Status", value: isRunning ? "Running" : "Idle", inline: true },
+            { name: "Provider", value: `\`${providerName}\``, inline: true },
+            { name: "Model", value: `\`${modelName}\``, inline: true },
             {
               name: "Session",
               value: sessionId ? `\`${sessionId.substring(0, 20)}...\`` : "No active session",
@@ -323,6 +406,102 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
               }],
             });
           }
+          break;
+        }
+      }
+    },
+  });
+
+  // /provider - Switch or check the AI provider for this channel
+  commandHandlers.set("provider", {
+    execute: async (ctx: InteractionContext) => {
+      setChannel(ctx);
+      const action = ctx.getString("action", true)!;
+      const defaultName = deps.getDefaultProviderName?.() || "claude-code";
+      const available = deps.getAvailableProviderNames?.() || ["claude-code"];
+      const current = deps.getChannelProvider?.() || defaultName;
+
+      switch (action) {
+        case "list": {
+          const providerList = available.map((name) => {
+            const isCurrent = name === current;
+            const isDefault = name === defaultName;
+            const markers = [
+              isCurrent ? "✅ current" : "",
+              isDefault ? "⭐ default" : "",
+            ].filter(Boolean).join(" | ");
+            return `**${name}**${markers ? ` — ${markers}` : ""}`;
+          }).join("\n");
+
+          await ctx.reply({
+            embeds: [{
+              color: 0x0099ff,
+              title: "Available Providers",
+              description: providerList || "No providers available.",
+              fields: [
+                { name: "Current", value: `\`${current}\``, inline: true },
+                { name: "Default", value: `\`${defaultName}\``, inline: true },
+              ],
+              timestamp: true,
+            }],
+          });
+          break;
+        }
+
+        case "set": {
+          const name = ctx.getString("name");
+          if (!name) {
+            await ctx.reply({
+              embeds: [{
+                color: 0xff0000,
+                title: "Missing Provider Name",
+                description: "Please specify a provider name using the `name` option.\nAvailable providers: " + available.join(", "),
+                timestamp: true,
+              }],
+            });
+            break;
+          }
+
+          if (!available.includes(name)) {
+            await ctx.reply({
+              embeds: [{
+                color: 0xff0000,
+                title: "Invalid Provider",
+                description: `Provider \`${name}\` is not available.\nAvailable providers: ${available.join(", ")}`,
+                timestamp: true,
+              }],
+            });
+            break;
+          }
+
+          if (deps.setChannelProvider) {
+            deps.setChannelProvider(name);
+          }
+
+          await ctx.reply({
+            embeds: [{
+              color: 0x00ff00,
+              title: "Provider Switched",
+              description: `This channel will now use **${name}** as its AI provider.\nUse \`/new\` to start a fresh session with the new provider.`,
+              timestamp: true,
+            }],
+          });
+          break;
+        }
+
+        case "status": {
+          await ctx.reply({
+            embeds: [{
+              color: 0x0099ff,
+              title: "Provider Status",
+              fields: [
+                { name: "Current Provider", value: `\`${current}\``, inline: true },
+                { name: "Default Provider", value: `\`${defaultName}\``, inline: true },
+                { name: "Available", value: available.join(", "), inline: false },
+              ],
+              timestamp: true,
+            }],
+          });
           break;
         }
       }

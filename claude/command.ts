@@ -39,9 +39,8 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       await ctx.editReply({
         embeds: [{
           color: 0xffff00,
-          title: 'Claude Code Running...',
+          title: 'AI Bot Running...',
           description: 'Waiting for response...',
-          fields: [{ name: 'Prompt', value: `\`${prompt.substring(0, 1020)}\``, inline: false }],
           timestamp: true
         }]
       });
@@ -131,8 +130,8 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           await ctx.editReply({
             embeds: [{
               color: 0xff0000,
-              title: 'Claude Code - No Response',
-              description: 'Claude Code returned without producing any output. Check that the CLI is installed and authenticated on the server.',
+              title: 'AI Bot - No Response',
+              description: 'The AI CLI returned without producing any output. Check that the CLI is installed and authenticated on the server.',
               fields,
               timestamp: true
             }]
@@ -164,7 +163,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         await ctx.editReply({
           embeds: [{
             color: 0xff0000,
-            title: 'Claude Code Error',
+            title: 'AI Bot Error',
             description: `\`\`\`\n${errorMsg.substring(0, 1500)}\n\`\`\``,
             fields,
             timestamp: true
@@ -195,7 +194,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       // Send initial message
       const embedData: { color: number; title: string; description: string; timestamp: boolean; fields?: Array<{ name: string; value: string; inline: boolean }> } = {
         color: 0xffff00,
-        title: 'Claude Code Continuing Conversation...',
+        title: 'AI Bot Continuing Conversation...',
         description: 'Loading latest conversation and waiting for response...',
         timestamp: true
       };
@@ -255,7 +254,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         return false;
       }
       
-      console.log("Cancelling Claude Code session...");
+      console.log("Cancelling AI Bot session...");
       deps.claudeController.abort();
       deps.setClaudeController(null);
       deps.setClaudeSessionId(undefined);

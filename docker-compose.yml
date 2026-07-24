@@ -1,12 +1,12 @@
-# Claude Code Discord Bot - Docker Compose Configuration
+# AI Bot - Docker Compose Configuration
 # Quick start: docker compose up -d
 
 services:
-  claude-bot:
+  ai-bot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: claude-code-discord
+    container_name: ai-bot
     restart: unless-stopped
     
     # Environment variables (use .env file or set here)
@@ -15,13 +15,13 @@ services:
       - APPLICATION_ID=${APPLICATION_ID}
       - WORK_DIR=${WORK_DIR:-/app/workspace}
       - USER_ID=${USER_ID:-}
-      - CATEGORY_NAME=${CATEGORY_NAME:-claude-code}
+      - CATEGORY_NAME=${CATEGORY_NAME:-ai-bot}
     
     # Volume mounts for persistence and workspace access
     volumes:
       # Persist bot data (todos, sessions, etc.)
       - bot-data:/app/.bot-data
-      # Optional: Mount your local workspace for Claude to work on
+      # Optional: Mount your local workspace for the AI to work on
       # Uncomment and modify path as needed:
       # - /path/to/your/project:/app/workspace
     
@@ -48,7 +48,7 @@ services:
     
     # Network mode
     networks:
-      - claude-network
+      - ai-bot-network
 
 # Named volumes for data persistence
 volumes:
@@ -57,5 +57,5 @@ volumes:
 
 # Network configuration
 networks:
-  claude-network:
+  ai-bot-network:
     driver: bridge

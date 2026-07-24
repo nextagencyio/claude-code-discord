@@ -1,6 +1,6 @@
 import { splitText } from "../discord/utils.ts";
 import type { ClaudeMessage } from "./types.ts";
-import type { MessageContent, EmbedData } from "../discord/types.ts";
+import type { MessageContent } from "../discord/types.ts";
 
 // Discord sender interface for dependency injection
 export interface DiscordSender {
@@ -158,17 +158,8 @@ export function createClaudeSender(sender: DiscordSender) {
             }]
           });
         } else if (toolName === 'Bash') {
-          const command = msg.metadata.input?.command || '';
-          const { preview } = truncateContent(command, 3, 300);
-
-          await sender.sendMessage({
-            embeds: [{
-              color: 0x0099ff,
-              title: 'Bash',
-              description: `\`\`\`bash\n${preview}\n\`\`\``,
-              timestamp: true
-            }]
-          });
+          // Skip Bash command echoes — internal shell commands, too noisy for Discord
+          break;
         } else if (toolName === 'Task') {
           const desc = msg.metadata.input?.description || msg.metadata.input?.prompt?.substring(0, 100) || 'Sub-agent task';
 
@@ -208,11 +199,6 @@ export function createClaudeSender(sender: DiscordSender) {
       }
 
       case 'system': {
-        // Skip pure telemetry subtypes — token accounting, not reader-facing
-        if (msg.metadata?.subtype === 'thinking_tokens') {
-          break;
-        }
-
         // Sub-agent heartbeat — show "still working" status
         if (msg.metadata?.subtype === 'heartbeat') {
           const elapsed = msg.metadata.elapsed_ms || 0;
@@ -229,36 +215,25 @@ export function createClaudeSender(sender: DiscordSender) {
           break;
         }
 
-        const embedData: EmbedData = {
-          color: msg.metadata?.subtype === 'completion' ? 0x00ff00 : 0xaaaaaa,
-          title: msg.metadata?.subtype === 'completion' ? 'Claude Code Complete' : `System: ${msg.metadata?.subtype || 'info'}`,
-          timestamp: true,
-          fields: []
-        };
-
-        if (msg.metadata?.model) {
-          embedData.fields!.push({ name: 'Model', value: msg.metadata.model, inline: true });
-        }
-        if (msg.metadata?.total_cost_usd !== undefined) {
-          embedData.fields!.push({ name: 'Cost', value: `$${msg.metadata.total_cost_usd.toFixed(4)}`, inline: true });
-        }
-        if (msg.metadata?.duration_ms !== undefined) {
-          embedData.fields!.push({ name: 'Duration', value: `${(msg.metadata.duration_ms / 1000).toFixed(2)}s`, inline: true });
-        }
-
-        // Special handling for shutdown
         if (msg.metadata?.subtype === 'shutdown') {
-          embedData.color = 0xff0000;
-          embedData.title = 'Shutdown';
-          embedData.description = `Bot stopped by signal ${msg.metadata.signal}`;
-          embedData.fields = [
-            { name: 'Category', value: msg.metadata.categoryName, inline: true },
-            { name: 'Repository', value: msg.metadata.repoName, inline: true },
-            { name: 'Branch', value: msg.metadata.branchName, inline: true }
-          ];
+          await sender.sendMessage({
+            embeds: [{
+              color: 0xff0000,
+              title: 'Shutdown',
+              description: `Bot stopped by signal ${msg.metadata.signal}`,
+              fields: [
+                { name: 'Category', value: msg.metadata.categoryName, inline: true },
+                { name: 'Repository', value: msg.metadata.repoName, inline: true },
+                { name: 'Branch', value: msg.metadata.branchName, inline: true }
+              ],
+              timestamp: true
+            }]
+          });
+          break;
         }
 
-        await sender.sendMessage({ embeds: [embedData] });
+        // Skip all other system messages (init, hook_started, hook_response,
+        // completion, thinking_tokens, ...) — noise in the channel
         break;
       }
 

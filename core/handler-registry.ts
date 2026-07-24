@@ -28,7 +28,7 @@ import { createSystemHandlers } from "../system/index.ts";
 import { createHelpHandlers } from "../help/index.ts";
 import { createAgentHandlers } from "../agent/index.ts";
 import { createScreenshotHandlers } from "../screenshot/index.ts";
-import { cleanSessionId, ClaudeSessionManager, CLAUDE_MODELS } from "../claude/index.ts";
+import { cleanSessionId, ClaudeSessionManager } from "../claude/index.ts";
 
 import type { ShellManager } from "../shell/index.ts";
 import type { WorktreeBotManager } from "../git/index.ts";
@@ -167,6 +167,8 @@ export interface HandlerRegistryDeps {
   sendClaudeMessages: (messages: ClaudeMessage[]) => Promise<void>;
   /** Callback when bot settings update */
   onBotSettingsUpdate?: (settings: { mentionEnabled: boolean; mentionUserId: string | null }) => void;
+  /** Per-channel model override (falls back to the global default model) */
+  getChannelModel?: () => string | undefined;
 }
 
 /**
@@ -360,7 +362,7 @@ export function createAllHandlers(
     setClaudeController: claudeSession.setController,
     setClaudeSessionId: claudeSession.setSessionId,
     sendClaudeMessages,
-    getDefaultModel: () => settings.getSettings().unified.defaultModel,
+    getDefaultModel: () => deps.getChannelModel?.() || settings.getSettings().unified.defaultModel,
   });
 
   const gitHandlers = createGitHandlers({
@@ -474,24 +476,17 @@ export function getAllCommands() {
 
     new SlashCommandBuilder()
       .setName("cancel")
-      .setDescription("Cancel the currently running Claude Code session"),
+      .setDescription("Cancel the currently running AI Bot session"),
 
     new SlashCommandBuilder()
       .setName("model")
-      .setDescription("Switch the Claude model")
+      .setDescription("Switch or list AI models for this channel's provider")
       // deno-lint-ignore no-explicit-any
       .addStringOption((option: any) =>
         option
           .setName("model")
-          .setDescription("Model to use")
-          .setRequired(true)
-          .addChoices(
-            // deno-lint-ignore no-explicit-any
-            ...Object.entries(CLAUDE_MODELS).map(([key, model]: [string, any]) => ({
-              name: `${model.name}${model.recommended ? " *" : ""}`,
-              value: key,
-            }))
-          )
+          .setDescription("Model ID to use (omit to list available models). Any ID the provider accepts works.")
+          .setRequired(false)
       ),
 
     new SlashCommandBuilder()
@@ -500,7 +495,7 @@ export function getAllCommands() {
 
     new SlashCommandBuilder()
       .setName("browser")
-      .setDescription("Connect Claude to your Chrome browser via CDP")
+      .setDescription("Connect the AI to your Chrome browser via CDP")
       // deno-lint-ignore no-explicit-any
       .addStringOption((option: any) =>
         option
@@ -519,6 +514,28 @@ export function getAllCommands() {
         option
           .setName("port")
           .setDescription("Chrome debugging port (default: 9222)")
+          .setRequired(false)
+      ),
+    new SlashCommandBuilder()
+      .setName("provider")
+      .setDescription("Switch or check the AI provider for this channel")
+      // deno-lint-ignore no-explicit-any
+      .addStringOption((option: any) =>
+        option
+          .setName("action")
+          .setDescription("Action to perform")
+          .setRequired(true)
+          .addChoices(
+            { name: "list — Show available providers", value: "list" },
+            { name: "set — Switch provider for this channel", value: "set" },
+            { name: "status — Show current provider", value: "status" },
+          )
+      )
+      // deno-lint-ignore no-explicit-any
+      .addStringOption((option: any) =>
+        option
+          .setName("name")
+          .setDescription("Provider name (for 'set' action)")
           .setRequired(false)
       ),
   ];

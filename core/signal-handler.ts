@@ -71,7 +71,7 @@ export function createShutdownHandler(
       // Kill all worktree bots
       ctx.killAllWorktreeBots();
       
-      // Cancel Claude Code session if active
+      // Cancel AI session if active
       const claudeController = ctx.getClaudeController();
       if (claudeController) {
         claudeController.abort();

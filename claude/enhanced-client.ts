@@ -2,8 +2,8 @@ import { sendToClaudeCode, type ClaudeModelOptions } from "./client.ts";
 import type { ClaudeMessage } from "./types.ts";
 import { recordAPIUsage } from "../util/usage-tracker.ts";
 
-// Enhanced Claude Code client with additional features
-// NOTE: Temperature and maxTokens are NOT supported by Claude Code CLI
+// Enhanced AI Bot client with additional features
+// NOTE: Temperature and maxTokens are NOT supported by the AI CLI
 // Only model selection, system prompts, and context options are supported
 export interface EnhancedClaudeOptions {
   workDir: string;
@@ -24,7 +24,7 @@ export interface ClaudeSession {
   workDir: string;
 }
 
-// Session manager for Claude Code
+// Session manager for AI Bot
 export class ClaudeSessionManager {
   private sessions = new Map<string, ClaudeSession>();
 
@@ -88,7 +88,7 @@ export class ClaudeSessionManager {
   }
 }
 
-// Enhanced Claude Code client with additional context
+// Enhanced AI Bot client with additional context
 export async function enhancedClaudeQuery(
   prompt: string,
   options: EnhancedClaudeOptions,
@@ -127,7 +127,7 @@ export async function enhancedClaudeQuery(
     }
   }
 
-  // Build model options - only model is supported by Claude Code CLI
+  // Build model options - only model is supported by the AI CLI
   const modelOptions: ClaudeModelOptions = {};
   if (options.model) {
     modelOptions.model = options.model;
@@ -271,7 +271,7 @@ async function getDenoInfo(): Promise<string> {
   }
 }
 
-// Claude Code model options - Updated with latest models
+// AI Bot model options - Updated with latest models
 export const CLAUDE_MODELS = {
   'claude-opus-4-8': {
     name: 'Claude Opus 4.8',

@@ -2,13 +2,13 @@ import { SlashCommandBuilder } from "npm:discord.js@14.14.1";
 import { CLAUDE_MODELS } from "../claude/enhanced-client.ts";
 
 // Unified settings interface combining all bot settings
-// NOTE: Temperature and maxTokens are NOT supported by Claude Code CLI
+// NOTE: Temperature and maxTokens are NOT supported by the AI CLI
 export interface UnifiedBotSettings {
   // Basic bot settings (formerly /settings)
   mentionEnabled: boolean;
   mentionUserId: string | null;
   
-  // Claude Code settings (only CLI-supported options)
+  // AI Bot settings (only CLI-supported options)
   defaultModel: string;
   defaultSystemPrompt: string | null;
   autoIncludeSystemInfo: boolean;

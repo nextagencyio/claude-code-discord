@@ -1,9 +1,9 @@
 #!/usr/bin/env -S deno run --allow-all
 
 /**
- * Claude Code Discord Bot - Main Entry Point
+ * AI Bot - Main Entry Point
  * 
- * This file bootstraps the Discord bot with Claude Code integration.
+ * This file bootstraps the Discord bot with AI CLI integration.
  * Most command handlers are now extracted to core modules for maintainability.
  * 
  * @module index
@@ -21,9 +21,10 @@ import {
 } from "./discord/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
-import { createClaudeSender, expandableContent, type DiscordSender, type ClaudeMessage } from "./claude/index.ts";
+import { createClaudeSender, expandableContent, type DiscordSender, type ClaudeMessage, convertToClaudeMessages } from "./claude/index.ts";
 import { DEFAULT_SETTINGS, UNIFIED_DEFAULT_SETTINGS } from "./settings/index.ts";
 import { cleanupPaginationStates } from "./discord/index.ts";
+import { createProviderRegistry, getDefaultProviderName, type AIProvider, type ProviderRegistry } from "./providers/index.ts";
 
 // Core modules - now handle most of the heavy lifting
 import {
@@ -52,7 +53,7 @@ export { sendToClaudeCode } from "./claude/index.ts";
 // ================================
 
 /**
- * Create Claude Code Discord Bot with all handlers and integrations.
+ * Create AI Bot with all handlers and integrations.
  */
 export async function createClaudeCodeBot(config: BotConfig) {
   const { discordToken, applicationId, workDir, repoName, branchName, categoryName, defaultMentionUserId } = config;
@@ -73,21 +74,62 @@ export async function createClaudeCodeBot(config: BotConfig) {
     messageQueue: QueuedMessage[];
     // deno-lint-ignore no-explicit-any
     mcpServers?: Record<string, any>;
+    // Whether this channel has been primed with its PROGRESS.md this process.
+    // Falsy after a bot restart (sessions loaded from disk) or a /new, so the
+    // next message re-injects the durable progress file as context.
+    primed?: boolean;
+    // Per-channel provider name (defaults to the global default provider)
+    providerName?: string;
+    // Per-channel model override (falls back to the global default model).
+    // Stored per-channel because a Claude model ID is invalid for Devin and
+    // vice-versa, so a single global model would clash across providers.
+    modelName?: string;
   }
   const channelSessions = new Map<string, ChannelSession>();
   let activeChannelId: string | undefined;
+
+  // Provider registry — supports multiple AI CLI backends (Claude Code, Devin, etc.)
+  const providerRegistry: ProviderRegistry = createProviderRegistry();
+  const defaultProviderName = getDefaultProviderName();
+  console.log(`[Providers] Default provider: ${defaultProviderName}`);
+
+  // Global cap on concurrent AI sessions across ALL channels. Each
+  // running session's process tree can hold several hundred MB, so unbounded
+  // cross-channel concurrency is the main driver of host memory-pressure
+  // lockups. This counting semaphore gates how many onClaude() calls run at
+  // once; a channel that can't get a slot waits (it stays "busy", so further
+  // messages to it queue per-channel as usual). Tune via MAX_CONCURRENT_CLAUDE.
+  const MAX_CONCURRENT_CLAUDE = Math.max(1, Number(Deno.env.get("MAX_CONCURRENT_CLAUDE") ?? "1"));
+  let claudeSlots = MAX_CONCURRENT_CLAUDE;
+  const claudeWaiters: Array<() => void> = [];
+  function acquireClaudeSlot(): Promise<void> {
+    if (claudeSlots > 0) {
+      claudeSlots--;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => claudeWaiters.push(resolve));
+  }
+  function releaseClaudeSlot(): void {
+    // Hand the freed slot directly to the next waiter (no increment) so the
+    // count can never exceed the cap; only bump the pool when nobody's waiting.
+    const next = claudeWaiters.shift();
+    if (next) next();
+    else claudeSlots++;
+  }
 
   // Session persistence file path
   const sessionStatePath = `${workDir}/.claude-sessions.json`;
 
   async function saveSessionState(): Promise<void> {
     try {
-      const state: Record<string, { sessionId?: string; channelName?: string }> = {};
+      const state: Record<string, { sessionId?: string; channelName?: string; providerName?: string; modelName?: string }> = {};
       for (const [channelId, session] of channelSessions) {
         if (session.sessionId) {
           state[channelId] = {
             sessionId: session.sessionId,
             channelName: session.channelName,
+            providerName: session.providerName,
+            modelName: session.modelName,
           };
         }
       }
@@ -100,7 +142,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
   async function loadSessionState(): Promise<void> {
     try {
       const content = await Deno.readTextFile(sessionStatePath);
-      const state: Record<string, { sessionId?: string; channelName?: string }> = JSON.parse(content);
+      const state: Record<string, { sessionId?: string; channelName?: string; providerName?: string; modelName?: string }> = JSON.parse(content);
       for (const [channelId, saved] of Object.entries(state)) {
         if (saved.sessionId) {
           const folderName = saved.channelName || channelId;
@@ -110,6 +152,8 @@ export async function createClaudeCodeBot(config: BotConfig) {
             channelWorkDir: `${workDir}/${folderName}`,
             channelName: saved.channelName,
             messageQueue: [],
+            providerName: saved.providerName,
+            modelName: saved.modelName,
           });
           console.log(`Restored session for channel ${folderName}: ${saved.sessionId}`);
         }
@@ -224,6 +268,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
           bot.updateBotSettings(settings);
         }
       },
+      getChannelModel: () => activeChannelId ? getChannelSession(activeChannelId).modelName : undefined,
     },
     {
       getController: () => activeChannelId ? getChannelSession(activeChannelId).controller : null,
@@ -240,7 +285,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
     messageHistory: messageHistoryOps,
     getClaudeController: () => activeChannelId ? getChannelSession(activeChannelId).controller : null,
     getClaudeSessionId: () => activeChannelId ? getChannelSession(activeChannelId).sessionId : undefined,
-    setClaudeSessionId: (id) => { if (activeChannelId) { getChannelSession(activeChannelId).sessionId = id; saveSessionState(); } },
+    setClaudeSessionId: (id) => { if (activeChannelId) { const s = getChannelSession(activeChannelId); s.sessionId = id; if (!id) s.primed = false; saveSessionState(); } },
     setActiveChannelId: (channelId) => { activeChannelId = channelId; },
     clearChannelQueue: () => {
       if (activeChannelId) {
@@ -260,6 +305,22 @@ export async function createClaudeCodeBot(config: BotConfig) {
     getChannelMcpServers: () => activeChannelId ? getChannelSession(activeChannelId).mcpServers : undefined,
     setChannelMcpServers: (servers) => { if (activeChannelId) getChannelSession(activeChannelId).mcpServers = servers; },
     cleanupInterval,
+    getChannelProvider: () => activeChannelId ? getChannelSession(activeChannelId).providerName : undefined,
+    setChannelProvider: (name) => { if (activeChannelId) { getChannelSession(activeChannelId).providerName = name; saveSessionState(); } },
+    getDefaultProviderName: () => defaultProviderName,
+    getAvailableProviderNames: () => {
+      const names: string[] = [];
+      // Synchronous check — returns all registered provider names
+      // (isAvailable() is async, so we return all and let /provider list handle availability)
+      for (const name of ["claude-code", "devin"]) {
+        if (providerRegistry.hasProvider(name)) names.push(name);
+      }
+      return names;
+    },
+    getChannelModel: () => activeChannelId ? getChannelSession(activeChannelId).modelName : undefined,
+    setChannelModel: (model) => { if (activeChannelId) { getChannelSession(activeChannelId).modelName = model; saveSessionState(); } },
+    getGlobalDefaultModel: () => settingsOps.getSettings().unified.defaultModel,
+    getProvider: (name) => providerRegistry.hasProvider(name) ? providerRegistry.getProvider(name) : undefined,
   });
 
   // Create button handlers (expand/collapse for truncated content)
@@ -365,9 +426,38 @@ export async function createClaudeCodeBot(config: BotConfig) {
     await processMessage(channelId, session, ctx, prompt);
   };
 
+  // Restore durable per-channel context from PROGRESS.md so a fresh Claude
+  // session can resume after a bot restart (or a /new) even when CLI session
+  // resume is unavailable. Runs once per channel per process; Claude is asked
+  // to keep PROGRESS.md updated via appendSystemPrompt (see claude/client.ts).
+  async function primeFromProgressFile(session: ChannelSession, prompt: string): Promise<string> {
+    if (session.primed) return prompt;
+    session.primed = true;
+    try {
+      const progressPath = `${session.channelWorkDir}/PROGRESS.md`;
+      const progress = (await Deno.readTextFile(progressPath)).trim();
+      if (progress.length === 0) return prompt;
+      // Cap injected context; keep the most recent tail if oversized.
+      const MAX_CHARS = 8000;
+      const body = progress.length > MAX_CHARS ? `...(truncated)...\n${progress.slice(-MAX_CHARS)}` : progress;
+      console.log(`[Prime] Restored PROGRESS.md context for #${session.channelName} (${progress.length} chars)`);
+      return `[Context restored from PROGRESS.md — the running progress log for this channel, ` +
+        `written by a previous session. Use it to continue where the last session left off and ` +
+        `avoid redoing completed work. Keep PROGRESS.md updated as you go.]\n\n` +
+        `${body}\n\n---\n\n${prompt}`;
+    } catch {
+      // No progress file yet — nothing to restore.
+      return prompt;
+    }
+  }
+
   // Process a single message (and drain the queue after)
   async function processMessage(channelId: string, session: ChannelSession, ctx: InteractionContext, prompt: string) {
     messageHistoryOps.addToHistory(prompt);
+
+    // On the first message since this process started (covers restarts) or the
+    // first after a /new, prepend the channel's saved progress as context.
+    prompt = await primeFromProgressFile(session, prompt);
 
     // Create a per-channel controller so channels don't block each other
     if (session.controller) {
@@ -381,17 +471,78 @@ export async function createClaudeCodeBot(config: BotConfig) {
       createDiscordSenderAdapter(() => bot.getChannelById(channelId))
     );
 
+    // Wait for a global slot before starting the heavy AI session, so the
+    // host never runs more than MAX_CONCURRENT_CLAUDE at once. The channel is
+    // already marked busy (controller set above), so its own messages queue.
+    await acquireClaudeSlot();
     try {
-      const result = await allHandlers.claude.onClaude(ctx, prompt, session.sessionId || undefined, channelSendFn, controller, session.mcpServers);
+      const providerName = session.providerName || defaultProviderName;
+      const provider = providerRegistry.getProvider(providerName);
 
-      // Update per-channel session state from result
-      session.sessionId = result.sessionId;
+      if (provider.name === "claude-code") {
+        // Claude Code uses the existing onClaude handler which wraps sendToClaudeCode
+        // with full streaming JSON support, sub-agent heartbeats, etc.
+        const result = await allHandlers.claude.onClaude(ctx, prompt, session.sessionId || undefined, channelSendFn, controller, session.mcpServers);
+        session.sessionId = result.sessionId;
+      } else {
+        // Generic provider path — uses provider.sendPrompt() with onMessage callback
+        await ctx.reply({
+          embeds: [{
+            color: 0xffff00,
+            title: `${provider.displayName} Running...`,
+            description: 'Waiting for response...',
+            timestamp: true,
+          }],
+        });
+
+        const result = await provider.sendPrompt({
+          workDir: session.channelWorkDir,
+          prompt,
+          controller,
+          sessionId: session.sessionId || undefined,
+          onMessage: (msg: ClaudeMessage) => {
+            channelSendFn([msg]).catch((err) => {
+              console.error(`[Provider ${provider.name} sender error]:`, err instanceof Error ? err.message : String(err));
+            });
+          },
+          onStreamJson: provider.name === "claude-code" ? (jsonData) => {
+            const claudeMessages = convertToClaudeMessages(jsonData);
+            if (claudeMessages.length > 0) {
+              channelSendFn(claudeMessages).catch((err) => {
+                console.error(`[Provider ${provider.name} stream error]:`, err instanceof Error ? err.message : String(err));
+              });
+            }
+          } : undefined,
+          modelOptions: (session.modelName || settingsOps.getSettings().unified.defaultModel) ? { model: session.modelName || settingsOps.getSettings().unified.defaultModel } : undefined,
+          workspaceRootDir: workDir,
+          mcpServers: session.mcpServers,
+        });
+
+        session.sessionId = result.sessionId;
+
+        // Send completion message
+        await channelSendFn([{
+          type: 'system',
+          content: '',
+          metadata: {
+            subtype: 'completion',
+            session_id: result.sessionId,
+            model: result.modelUsed || 'Default',
+            total_cost_usd: result.cost,
+            duration_ms: result.duration,
+            cwd: session.channelWorkDir,
+          },
+        }]).catch(() => {});
+      }
+
       saveSessionState();
     } catch (error) {
       console.error(`[processMessage] Unhandled error in channel ${channelId}:`, error instanceof Error ? error.message : String(error));
     } finally {
-      // ALWAYS clear the controller so the channel doesn't stay "busy" forever
+      // ALWAYS clear the controller so the channel doesn't stay "busy" forever,
+      // and release the global slot for the next waiting channel.
       session.controller = null;
+      releaseClaudeSlot();
     }
 
     // Process next queued message if any
@@ -539,6 +690,21 @@ export async function createClaudeCodeBot(config: BotConfig) {
     }
   }
 
+  // ================================
+  // Slack agent (optional — rfpbids proposal edits + email drafts)
+  // ================================
+  // Additive + fully gated: no-ops unless SLACK_APP_TOKEN + SLACK_AGENT_BOT_TOKEN
+  // are set, so the Discord path is unaffected. Runs a separate `rfpbids-agent`
+  // Slack app in Socket Mode; never blocks or crashes bot startup.
+  try {
+    const { startSlackAgent } = await import("./slack/agent.ts");
+    startSlackAgent({ workDir }).catch((err) =>
+      console.error("[slack-agent] failed to start:", err instanceof Error ? err.message : String(err))
+    );
+  } catch (err) {
+    console.error("[slack-agent] import failed:", err instanceof Error ? err.message : String(err));
+  }
+
   // Setup signal handlers for graceful shutdown
   setupSignalHandlers({
     managers,
@@ -666,7 +832,7 @@ function setupSignalHandlers(ctx: {
       shellHandlers.killAllProcesses();
       gitHandlers.killAllWorktreeBots();
       
-      // Cancel all Claude Code sessions
+      // Cancel all AI sessions
       if (abortAllSessions) {
         abortAllSessions();
       } else {

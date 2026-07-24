@@ -178,7 +178,7 @@ export async function createDiscordBot(
           name: 'general',
           type: ChannelType.GuildText,
           parent: category.id,
-          topic: `Claude Code Bot | Working Directory: ${workDir}`,
+          topic: `AI Bot | Working Directory: ${workDir}`,
         });
         console.log(`Created "general" channel`);
       } catch (error) {
@@ -515,11 +515,11 @@ export async function createDiscordBot(
           embeds: [{
             color: 0x00ff00,
             title: 'Startup Complete',
-            description: `Claude Code bot is ready. Each channel in this category is an independent session.`,
+            description: `AI Bot is ready. Each channel in this category is an independent session.`,
             fields: [
               { name: 'Category', value: actualCategoryName, inline: true },
               { name: 'Working Directory', value: `\`${workDir}\``, inline: false },
-              { name: 'Usage', value: 'Type a message in any channel to start a Claude session. Use `/new` to reset a channel\'s session.', inline: false }
+              { name: 'Usage', value: 'Type a message in any channel to start an AI session. Use `/new` to reset a channel\'s session.', inline: false }
             ],
             timestamp: true
           }]

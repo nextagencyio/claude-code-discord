@@ -45,13 +45,26 @@ export function cleanSessionId(sessionId: string): string {
     .trim();                         // Remove whitespace again
 }
 
-// Model options for Claude Code
+// Model options for the AI CLI
 // NOTE: Only model selection is supported by the CLI
 export interface ClaudeModelOptions {
   model?: string;
 }
 
-// Wrapper for Claude Code SDK query function
+// Instruction appended to every AI session system prompt. This bot's process
+// can be restarted at any time (and CLI sessions can be pruned), so we ask
+// the AI to keep a durable, human-readable progress file in each channel's
+// working directory. On restart the bot re-injects this file (see index.ts
+// priming), letting a fresh session pick up where the last one left off.
+export const PROGRESS_FILE_INSTRUCTION =
+  `You are running as a Discord-triggered AI Bot session, and this process may be ` +
+  `restarted at any time. Maintain a concise running progress file named PROGRESS.md in ` +
+  `your current working directory. Update it at meaningful milestones (not after every ` +
+  `trivial step) with: the current task/goal, key decisions made, what's completed, what's ` +
+  `next, and any important state or file paths. Keep it a tight summary rather than a full ` +
+  `transcript, so that a future session can read PROGRESS.md and resume the work after a restart.`;
+
+// Wrapper for the AI CLI query function
 export async function sendToClaudeCode(
   workDir: string,
   prompt: string,
@@ -98,6 +111,7 @@ export async function sendToClaudeCode(
           cwd: workDir,
           pathToClaudeCodeExecutable: Deno.env.get("CLAUDE_PATH") || "claude",
           permissionMode: "bypassPermissions" as const,
+          appendSystemPrompt: PROGRESS_FILE_INSTRUCTION,
           ...(workspaceRootDir && { canUseTool: createWorkspaceWriteGuard(workspaceRootDir, workDir) }),
           verbose: true,
           outputFormat: "stream-json",
@@ -107,12 +121,12 @@ export async function sendToClaudeCode(
           ...(mcpServers && Object.keys(mcpServers).length > 0 && { mcpServers }),
           stderr: (data: string) => {
             stderrLines.push(data);
-            console.error(`[Claude Code stderr]: ${data}`);
+            console.error(`[AI CLI stderr]: ${data}`);
           },
         },
       };
 
-      console.log(`Claude Code: Running with ${modelToUse || 'default'} model in cwd: ${workDir}`);
+      console.log(`AI Bot: Running with ${modelToUse || 'default'} model in cwd: ${workDir}`);
       if (continueMode) {
         console.log(`Continue mode: Reading latest conversation in directory`);
       } else if (shouldResume) {
@@ -121,9 +135,9 @@ export async function sendToClaudeCode(
         console.log(`Skipping session resume (previous attempt failed), starting fresh`);
       }
 
-      console.log(`Claude Code: Creating query iterator...`);
+      console.log(`AI Bot: Creating query iterator...`);
       const iterator = claudeQuery(queryOptions);
-      console.log(`Claude Code: Iterator created, starting to read messages...`);
+      console.log(`AI Bot: Iterator created, starting to read messages...`);
       const currentMessages: SDKMessage[] = [];
       let currentResponse = "";
       let currentSessionId: string | undefined;

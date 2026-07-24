@@ -4,10 +4,10 @@ import { CLAUDE_MODELS, CLAUDE_TEMPLATES } from "./enhanced-client.ts";
 export const enhancedClaudeCommands = [
   new SlashCommandBuilder()
     .setName('claude-enhanced')
-    .setDescription('Send message to Claude Code with advanced options')
+    .setDescription('Send message to AI Bot with advanced options')
     .addStringOption(option =>
       option.setName('prompt')
-        .setDescription('Prompt for Claude Code')
+        .setDescription('Prompt for AI Bot')
         .setRequired(true))
     .addStringOption(option =>
       option.setName('model')
@@ -52,7 +52,7 @@ export const enhancedClaudeCommands = [
 
   new SlashCommandBuilder()
     .setName('claude-sessions')
-    .setDescription('Manage Claude Code sessions')
+    .setDescription('Manage AI Bot sessions')
     .addStringOption(option =>
       option.setName('action')
         .setDescription('Action to perform')
@@ -138,7 +138,7 @@ export function createEnhancedClaudeHandlers(deps: EnhancedClaudeHandlerDeps) {
         await ctx.editReply({
           embeds: [{
             color: 0xffff00,
-            title: '🤖 Enhanced Claude Code Running...',
+            title: '🤖 Enhanced AI Bot Running...',
             description: 'Processing with advanced options...',
             fields: [
               { name: 'Model', value: model || 'Default', inline: true },

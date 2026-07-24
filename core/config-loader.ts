@@ -1,5 +1,5 @@
 /**
- * Configuration loader for the Claude Code Discord Bot.
+ * Configuration loader for the AI Bot.
  * Handles command-line argument parsing and environment variable validation.
  * 
  * @module core/config-loader

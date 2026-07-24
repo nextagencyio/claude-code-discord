@@ -555,7 +555,7 @@ export function createUtilityCommandHandlers(
             color: 0x00ffff,
             title: 'Status',
             fields: [
-              { name: 'Claude Code', value: sessionStatus, inline: true },
+              { name: 'AI Bot', value: sessionStatus, inline: true },
               { name: 'Git Branch', value: gitStatusInfo.branch, inline: true },
               { name: 'Shell Processes', value: `${runningCount} running`, inline: true },
               { name: 'Worktree Bots', value: `${worktreeStatus.totalBots} running`, inline: true },

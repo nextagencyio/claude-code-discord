@@ -148,7 +148,7 @@ function updateStats(stats: UsageStatistics, record: APIUsageRecord): void {
 }
 
 /**
- * Record API usage from a Claude Code response
+ * Record API usage from an AI response
  */
 export async function recordAPIUsage(
   model: string,

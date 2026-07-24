@@ -1,6 +1,6 @@
 # Core Module Architecture
 
-This directory contains the core infrastructure modules for the Claude Code Discord Bot.
+This directory contains the core infrastructure modules for the AI Bot.
 These modules follow a factory pattern approach for better testability and maintainability.
 
 ## Module Overview

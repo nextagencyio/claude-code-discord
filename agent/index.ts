@@ -6,7 +6,7 @@ import {
 } from "../util/persistence.ts";
 
 // Agent types and interfaces
-// NOTE: Temperature and maxTokens are NOT supported by Claude Code CLI
+// NOTE: Temperature and maxTokens are NOT supported by the AI CLI
 // These agents use model and systemPrompt (which ARE supported)
 export interface AgentConfig {
   name: string;
@@ -28,7 +28,7 @@ export interface AgentSession {
 }
 
 // Predefined agent configurations
-// NOTE: These agents use model and systemPrompt which ARE supported by Claude Code CLI
+// NOTE: These agents use model and systemPrompt which ARE supported by the AI CLI
 export const PREDEFINED_AGENTS: Record<string, AgentConfig> = {
   'code-reviewer': {
     name: 'Code Reviewer',
@@ -416,7 +416,7 @@ async function chatWithAgent(
     }]
   });
 
-  // Call Claude Code with agent-specific configuration
+  // Call AI with agent-specific configuration
   try {
     const { enhancedClaudeQuery } = await import("../claude/enhanced-client.ts");
     const { convertToClaudeMessages } = await import("../claude/message-converter.ts");

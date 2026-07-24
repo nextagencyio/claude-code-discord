@@ -1,4 +1,4 @@
-// Claude Code integration exports
+// AI Bot integration exports
 export { createClaudeHandlers } from "./command.ts";
 export { cleanSessionId, sendToClaudeCode } from "./client.ts";
 export { createClaudeSender, expandableContent } from "./discord-sender.ts";

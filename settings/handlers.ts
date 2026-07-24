@@ -19,8 +19,8 @@ export function createAdvancedSettingsHandlers(deps: SettingsHandlerDeps) {
             await ctx.reply({
               embeds: [{
                 color: 0x0099ff,
-                title: '🤖 Claude Code Settings',
-                description: 'Note: Only model and context options are supported by Claude Code CLI',
+                title: '🤖 AI Bot Settings',
+                description: 'Note: Only model and context options are supported by the AI CLI',
                 fields: [
                   { name: 'Default Model', value: `\`${settings.defaultModel}\`\n${CLAUDE_MODELS[settings.defaultModel as keyof typeof CLAUDE_MODELS]?.name || 'Unknown'}`, inline: true },
                   { name: 'Auto System Info', value: settings.autoIncludeSystemInfo ? 'Enabled' : 'Disabled', inline: true },
@@ -71,7 +71,7 @@ export function createAdvancedSettingsHandlers(deps: SettingsHandlerDeps) {
             });
             break;
 
-          // NOTE: set-temperature and set-max-tokens removed - NOT supported by Claude Code CLI
+          // NOTE: set-temperature and set-max-tokens removed - NOT supported by AI CLI
 
           case 'set-system-prompt':
             if (!value) {
@@ -139,7 +139,7 @@ export function createAdvancedSettingsHandlers(deps: SettingsHandlerDeps) {
               embeds: [{
                 color: 0x00ff00,
                 title: '✅ Settings Reset',
-                description: 'Claude Code settings have been reset to defaults',
+                description: 'AI Bot settings have been reset to defaults',
                 timestamp: true
               }],
               ephemeral: true

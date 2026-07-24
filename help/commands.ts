@@ -21,8 +21,8 @@ export interface HelpHandlerDeps {
 // Detailed command information
 export const COMMAND_HELP = {
   claude: {
-    title: "🤖 Claude Code Integration",
-    description: "Send prompts to Claude Code CLI for AI-powered development assistance",
+    title: "🤖 AI Bot Integration",
+    description: "Send prompts to AI CLI for AI-powered development assistance",
     usage: "/claude prompt: [your message] session_id: [optional]",
     examples: [
       "/claude prompt: Help me fix this bug in my TypeScript code",
@@ -41,7 +41,7 @@ export const COMMAND_HELP = {
   },
   continue: {
     title: "⏭️ Continue Conversation",
-    description: "Continue the most recent Claude Code conversation in this directory",
+    description: "Continue the most recent AI Bot conversation in this directory",
     usage: "/continue prompt: [optional additional message]",
     examples: [
       "/continue",
@@ -58,13 +58,13 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-cancel": {
-    title: "❌ Cancel Claude Session",
-    description: "Cancel any currently running Claude Code operation",
+    title: "❌ Cancel AI Session",
+    description: "Cancel any currently running AI Bot operation",
     usage: "/claude-cancel",
     examples: ["/claude-cancel"],
     parameters: [],
     notes: [
-      "Immediately stops Claude Code execution",
+      "Immediately stops AI Bot execution",
       "Safe to use - no data loss",
       "Use when Claude is taking too long or stuck"
     ]
@@ -244,10 +244,31 @@ export const COMMAND_HELP = {
     examples: ["/status"],
     parameters: [],
     notes: [
-      "Shows Claude Code session status",
+      "Shows AI Bot session status",
+      "Displays current AI provider for this channel",
       "Displays Git branch and repository info",
       "Lists running shell processes count",
       "Shows worktree bot count and mention settings"
+    ]
+  },
+  provider: {
+    title: "🔌 AI Provider",
+    description: "Switch or check the AI provider for this channel",
+    usage: "/provider action: [list|set|status] name: [provider name]",
+    examples: [
+      "/provider action: list",
+      "/provider action: set name: devin",
+      "/provider action: status"
+    ],
+    parameters: [
+      { name: "action", description: "Action to perform (list, set, status)", required: true },
+      { name: "name", description: "Provider name (for 'set' action)", required: false }
+    ],
+    notes: [
+      "list: Show all available AI providers",
+      "set: Switch this channel to use a different provider",
+      "status: Show the current provider for this channel",
+      "Use /new after switching providers to start a fresh session"
     ]
   },
   settings: {
@@ -291,13 +312,13 @@ export const COMMAND_HELP = {
     notes: [
       "Stops all running shell processes",
       "Kills all worktree bot instances",
-      "Cancels any running Claude Code sessions",
+      "Cancels any running AI Bot sessions",
       "Use with caution - requires manual restart"
     ]
   },
   "claude-enhanced": {
-    title: "🚀 Enhanced Claude Code Integration",
-    description: "Send prompts to Claude Code with advanced options and context",
+    title: "🚀 Enhanced AI Bot Integration",
+    description: "Send prompts to AI Bot with advanced options and context",
     usage: "/claude-enhanced prompt: [message] model: [model] template: [template] ...",
     examples: [
       "/claude-enhanced prompt: Debug this error include_system_info: true",
@@ -321,8 +342,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-models": {
-    title: "🤖 Available Claude Models",
-    description: "List all available Claude models and their capabilities",
+    title: "🤖 Available AI Models",
+    description: "List all available AI models and their capabilities",
     usage: "/claude-models",
     examples: ["/claude-models"],
     parameters: [],
@@ -333,8 +354,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-sessions": {
-    title: "📋 Claude Session Management",
-    description: "Manage and view Claude Code conversation sessions",
+    title: "📋 AI Session Management",
+    description: "Manage and view AI Bot conversation sessions",
     usage: "/claude-sessions action: [action] session_id: [optional]",
     examples: [
       "/claude-sessions action: list",
@@ -377,8 +398,8 @@ export const COMMAND_HELP = {
   },
   */
   "claude-context": {
-    title: "📋 Claude Context Preview",
-    description: "Preview what context information would be sent to Claude",
+    title: "📋 AI Context Preview",
+    description: "Preview what context information would be sent to the AI",
     usage: "/claude-context include_system_info: [true/false] include_git_context: [true/false] ...",
     examples: [
       "/claude-context include_system_info: true",
@@ -584,8 +605,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-explain": {
-    title: "🧠 Claude Code Explanation",
-    description: "Ask Claude to explain code, concepts, or errors in detail",
+    title: "🧠 AI Bot Explanation",
+    description: "Ask AI to explain code, concepts, or errors in detail",
     usage: "/claude-explain content: [code/concept] detail_level: [basic/detailed/expert] include_examples: [true/false]",
     examples: [
       "/claude-explain content: const result = array.reduce((acc, item) => acc + item, 0)",
@@ -604,8 +625,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-debug": {
-    title: "🐛 Claude Code Debugging",
-    description: "Get help debugging code issues and errors with Claude's assistance",
+    title: "🐛 AI Bot Debugging",
+    description: "Get help debugging code issues and errors with AI's assistance",
     usage: "/claude-debug error_or_code: [error/code] language: [language] context_files: [files]",
     examples: [
       "/claude-debug error_or_code: TypeError: Cannot read property 'length' of null language: javascript",
@@ -624,8 +645,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-optimize": {
-    title: "⚡ Claude Code Optimization",
-    description: "Get code optimization suggestions from Claude with specific focus areas",
+    title: "⚡ AI Bot Optimization",
+    description: "Get code optimization suggestions from AI with specific focus areas",
     usage: "/claude-optimize code: [code] focus: [performance/readability/memory/security/all] preserve_functionality: [true/false]",
     examples: [
       "/claude-optimize code: for(let i=0; i<items.length; i++) {...} focus: performance",
@@ -644,8 +665,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-review": {
-    title: "🔍 Claude Code Review",
-    description: "Get comprehensive code review from Claude with quality analysis",
+    title: "🔍 AI Bot Review",
+    description: "Get comprehensive code review from AI with quality analysis",
     usage: "/claude-review code_or_file: [code/file] review_type: [quick/standard/deep] include_security: [true/false] include_performance: [true/false]",
     examples: [
       "/claude-review code_or_file: src/components/UserForm.tsx review_type: standard",
@@ -665,8 +686,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-generate": {
-    title: "🔨 Claude Code Generation",
-    description: "Generate code, tests, or documentation with Claude's assistance",
+    title: "🔨 AI Bot Generation",
+    description: "Generate code, tests, or documentation with AI's assistance",
     usage: "/claude-generate request: [description] type: [function/class/test/documentation/api/component] style: [clean/performance/functional/oop]",
     examples: [
       "/claude-generate request: Create a user authentication function type: function style: clean",
@@ -685,8 +706,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-refactor": {
-    title: "🔧 Claude Code Refactoring",
-    description: "Refactor existing code with Claude's guidance and best practices",
+    title: "🔧 AI Bot Refactoring",
+    description: "Refactor existing code with AI's guidance and best practices",
     usage: "/claude-refactor code: [code] goal: [modernize/simplify/extract/typescript/performance] preserve_behavior: [true/false] add_tests: [true/false]",
     examples: [
       "/claude-refactor code: var oldFunction = function() {...} goal: modernize",
@@ -706,8 +727,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-learn": {
-    title: "🎓 Claude Programming Tutor",
-    description: "Learn programming concepts with Claude as your personal tutor",
+    title: "🎓 AI Programming Tutor",
+    description: "Learn programming concepts with AI as your personal tutor",
     usage: "/claude-learn topic: [concept] level: [beginner/intermediate/advanced] include_exercises: [true/false] step_by_step: [true/false]",
     examples: [
       "/claude-learn topic: async/await in JavaScript level: intermediate include_exercises: true",
@@ -727,8 +748,8 @@ export const COMMAND_HELP = {
     ]
   },
   "claude-settings": {
-    title: "⚙️ Claude Code Settings",
-    description: "Manage Claude Code specific settings and preferences",
+    title: "⚙️ AI Bot Settings",
+    description: "Manage AI Bot specific settings and preferences",
     usage: "/claude-settings action: [show/set-model/toggle-auto-system-info/toggle-auto-git-context/set-system-prompt] value: [optional]",
     examples: [
       "/claude-settings action: show",
@@ -744,7 +765,7 @@ export const COMMAND_HELP = {
       "Configure default model and context options",
       "Enable/disable automatic system info and git context",
       "Set custom system prompts for specialized tasks",
-      "Note: Only model and context options are supported by Claude Code CLI"
+      "Note: Only model and context options are supported by the AI CLI"
     ]
   },
   "output-settings": {
@@ -768,7 +789,7 @@ export const COMMAND_HELP = {
   },
   "quick-model": {
     title: "🚀 Quick Model Switch",
-    description: "Quickly switch Claude model for your next conversation",
+    description: "Quickly switch AI model for your next conversation",
     usage: "/quick-model model: [model-id]",
     examples: [
       "/quick-model model: claude-sonnet-4",
@@ -776,12 +797,33 @@ export const COMMAND_HELP = {
       "/quick-model model: claude-3-5-sonnet-20241022"
     ],
     parameters: [
-      { name: "model", description: "Claude model to use", required: true }
+      { name: "model", description: "AI model to use", required: true }
     ],
     notes: [
       "Instantly switches to selected model",
       "Shows model capabilities and features",
       "Applies to all new conversations until changed again"
+    ]
+  },
+  model: {
+    title: "🤖 Model Selection",
+    description: "Switch or list AI models for this channel's active provider",
+    usage: "/model model: [model-id]  (or just /model to list available models)",
+    examples: [
+      "/model",
+      "/model model: opus",
+      "/model model: sonnet",
+      "/model model: glm-5-2-max"
+    ],
+    parameters: [
+      { name: "model", description: "Model ID to use (omit to list available models). Any ID the provider accepts works.", required: false }
+    ],
+    notes: [
+      "With no argument, lists the models available to this channel's provider",
+      "Model IDs are provider-specific — a Claude ID won't work for Devin and vice-versa",
+      "The model is stored per-channel and persists across bot restarts",
+      "Use /provider to switch the channel's provider first, then /model to pick a model",
+      "Use /new after switching models to start a fresh session"
     ]
   }
 };
@@ -856,21 +898,21 @@ export function createHelpHandlers(deps: HelpHandlerDeps) {
         await ctx.reply({
           embeds: [{
             color: 0x00ff00,
-            title: "🤖 Claude Code Discord Bot - Help",
+            title: "🤖 AI Bot - Help",
             description: `Bot for **${deps.repoName}** (${deps.branchName} branch)\n\nUse \`/help command:[name]\` for detailed help on specific commands.`,
             fields: [
               {
-                name: "🤖 Claude Code Commands",
-                value: "`/claude` - Send prompts to Claude Code\n`/claude-enhanced` - Advanced Claude with options\n`/continue` - Continue conversation\n`/claude-cancel` - Cancel running operation",
+                name: "🤖 AI Bot Commands",
+                value: "`/claude` - Send prompts to AI Bot\n`/claude-enhanced` - Advanced AI with options\n`/continue` - Continue conversation\n`/claude-cancel` - Cancel running operation",
                 inline: false
               },
               {
-                name: "🚀 Enhanced Claude Features",
+                name: "🚀 Enhanced AI Features",
                 value: "`/claude-models` - List available models\n`/claude-sessions` - Manage sessions\n`/claude-context` - Preview context",
                 inline: false
               },
               {
-                name: "🧠 Claude Development Tools",
+                name: "🧠 AI Development Tools",
                 value: "`/claude-explain` - Explain code/concepts\n`/claude-debug` - Debug assistance\n`/claude-optimize` - Code optimization\n`/claude-review` - Code review\n`/claude-generate` - Generate code\n`/claude-refactor` - Refactor code\n`/claude-learn` - Programming tutor",
                 inline: false
               },
@@ -881,7 +923,7 @@ export function createHelpHandlers(deps: HelpHandlerDeps) {
               },
               {
                 name: "⚙️ Advanced Settings",
-                value: "`/settings` - Unified bot settings (NEW)\n`/claude-settings` - Claude preferences\n`/output-settings` - Display settings\n`/quick-model` - Switch Claude model",
+                value: "`/settings` - Unified bot settings (NEW)\n`/claude-settings` - AI preferences\n`/output-settings` - Display settings\n`/quick-model` - Switch AI model",
                 inline: false
               },
               {
@@ -906,12 +948,12 @@ export function createHelpHandlers(deps: HelpHandlerDeps) {
               },
               {
                 name: "⚙️ Utility Commands",
-                value: "`/status` - Show system status\n`/settings` - Manage bot settings\n`/pwd` - Show working directory\n`/shutdown` - Shutdown bot",
+                value: "`/status` - Show system status\n`/provider` - Switch or check AI provider\n`/settings` - Manage bot settings\n`/pwd` - Show working directory\n`/shutdown` - Shutdown bot",
                 inline: false
               },
               {
                 name: "💡 Quick Tips",
-                value: "• Use buttons on Claude responses for quick actions\n• Shell processes support interactive input\n• Each worktree gets its own bot instance\n• Session IDs persist across restarts",
+                value: "• Use buttons on AI responses for quick actions\n• Shell processes support interactive input\n• Each worktree gets its own bot instance\n• Session IDs persist across restarts",
                 inline: false
               }
             ],

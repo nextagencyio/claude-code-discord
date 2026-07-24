@@ -2,14 +2,14 @@ import { SlashCommandBuilder } from "npm:discord.js@14.14.1";
 import { CLAUDE_MODELS } from "../claude/enhanced-client.ts";
 
 // Advanced bot settings configuration
-// NOTE: Temperature and maxTokens are NOT supported by Claude Code CLI
+// NOTE: Temperature and maxTokens are NOT supported by the AI CLI
 // Only model selection, system prompts, and context options are supported
 export interface AdvancedBotSettings {
   // Notification settings
   mentionEnabled: boolean;
   mentionUserId: string | null;
   
-  // Claude Code settings (only features supported by CLI)
+  // AI Bot settings (only features supported by CLI)
   defaultModel: string;
   defaultSystemPrompt: string | null;
   autoIncludeSystemInfo: boolean;
@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: AdvancedBotSettings = {
   mentionEnabled: false,
   mentionUserId: null,
   
-  // Claude Code (only CLI-supported options)
+  // AI Bot (only CLI-supported options)
   defaultModel: 'claude-opus-4-8',
   defaultSystemPrompt: null,
   autoIncludeSystemInfo: false,
@@ -73,7 +73,7 @@ export const DEFAULT_SETTINGS: AdvancedBotSettings = {
 export const advancedSettingsCommands = [
   new SlashCommandBuilder()
     .setName('claude-settings')
-    .setDescription('Manage Claude Code specific settings')
+    .setDescription('Manage AI Bot specific settings')
     .addStringOption(option =>
       option.setName('action')
         .setDescription('Setting action to perform')
