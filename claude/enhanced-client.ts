@@ -273,11 +273,18 @@ async function getDenoInfo(): Promise<string> {
 
 // AI Bot model options - Updated with latest models
 export const CLAUDE_MODELS = {
-  'claude-opus-4-8': {
-    name: 'Claude Opus 4.8',
-    description: 'Most powerful Claude model with superior reasoning and coding',
+  'claude-opus-5': {
+    name: 'Claude Opus 5',
+    description: 'Latest and most capable Claude model with superior reasoning and coding',
     contextWindow: 200000,
     recommended: true,
+    supportsThinking: true
+  },
+  'claude-opus-4-8': {
+    name: 'Claude Opus 4.8',
+    description: 'Previous-generation Opus with superior reasoning and coding',
+    contextWindow: 200000,
+    recommended: false,
     supportsThinking: true
   },
   'claude-opus-4-6': {

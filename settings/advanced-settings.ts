@@ -43,7 +43,7 @@ export const DEFAULT_SETTINGS: AdvancedBotSettings = {
   mentionUserId: null,
   
   // AI Bot (only CLI-supported options)
-  defaultModel: 'claude-opus-4-8',
+  defaultModel: 'claude-opus-5',
   defaultSystemPrompt: null,
   autoIncludeSystemInfo: false,
   autoIncludeGitContext: true,
