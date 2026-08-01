@@ -347,14 +347,31 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
       const available = deps.getAvailableProviderNames?.() || ["claude-code"];
       const current = deps.getChannelProvider?.() || defaultName;
 
+      // `list` and `set` shell out to every provider's CLI to check whether it
+      // is installed. That is far too slow for Discord's 3-second ack window
+      // (agy's probe alone is ~1.5s), so acknowledge first and edit the reply
+      // in. Without this the user just gets "The application did not respond".
+      const needsProbe = action === "list" || action === "set";
+      let deferred = false;
+      if (needsProbe) {
+        await ctx.deferReply();
+        deferred = true;
+      }
+      // interaction.reply() throws once deferred — route to editReply instead.
+      const respond = (content: Parameters<typeof ctx.reply>[0]) =>
+        deferred ? ctx.editReply(content) : ctx.reply(content);
+
       switch (action) {
         case "list": {
-          // Check availability of each provider (async)
-          const availability: Record<string, boolean> = {};
-          for (const name of available) {
-            const provider = deps.getProvider?.(name);
-            availability[name] = provider?.isAvailable ? await provider.isAvailable() : true;
-          }
+          // Probe every provider CONCURRENTLY — serially this is the sum of
+          // five process spawns, which is what pushed the command past the
+          // interaction timeout when the provider list grew from two to five.
+          const availability: Record<string, boolean> = Object.fromEntries(
+            await Promise.all(available.map(async (name) => {
+              const provider = deps.getProvider?.(name);
+              return [name, provider?.isAvailable ? await provider.isAvailable() : true] as const;
+            })),
+          );
 
           const providerList = available.map((name) => {
             const isCurrent = name === current;
@@ -368,7 +385,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
             return `**${name}**${markers ? ` — ${markers}` : ""}`;
           }).join("\n");
 
-          await ctx.reply({
+          await respond({
             embeds: [{
               color: 0x0099ff,
               title: "Available Providers",
@@ -392,7 +409,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
           const requested = ctx.getString("name");
           const name = (requested && deps.resolveProviderName?.(requested)) || requested;
           if (!name) {
-            await ctx.reply({
+            await respond({
               embeds: [{
                 color: 0xff0000,
                 title: "Missing Provider Name",
@@ -404,7 +421,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
           }
 
           if (!available.includes(name)) {
-            await ctx.reply({
+            await respond({
               embeds: [{
                 color: 0xff0000,
                 title: "Invalid Provider",
@@ -425,7 +442,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
           }
 
           if (!isAvailable) {
-            await ctx.reply({
+            await respond({
               embeds: [{
                 color: 0xffaa00,
                 title: "Provider Switched (with warning)",
@@ -436,7 +453,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
             break;
           }
 
-          await ctx.reply({
+          await respond({
             embeds: [{
               color: 0x00ff00,
               title: "Provider Switched",
@@ -448,7 +465,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
         }
 
         case "status": {
-          await ctx.reply({
+          await respond({
             embeds: [{
               color: 0x0099ff,
               title: "Provider Status",

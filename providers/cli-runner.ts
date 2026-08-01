@@ -150,13 +150,28 @@ export function tryParseJson<T>(line: string): T | null {
 /**
  * Is this CLI on the PATH? Every provider's isAvailable() runs a cheap
  * version/help probe; a non-zero exit or a missing binary both mean "no".
+ *
+ * Bounded by a timeout because these probes run on the /provider command's
+ * critical path. Not every CLI has an offline version flag — agy's cheapest
+ * probe is `agy models`, which talks to the network — so a wedged or
+ * unreachable CLI must report "unavailable" rather than stall the command.
  */
-export async function probeCli(bin: string, args: string[]): Promise<boolean> {
+export async function probeCli(bin: string, args: string[], timeoutMs = 5000): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const cmd = new Deno.Command(bin, { args, stdout: "null", stderr: "null" });
+    const cmd = new Deno.Command(bin, {
+      args,
+      stdout: "null",
+      stderr: "null",
+      stdin: "null",
+      signal: controller.signal,
+    });
     const { success } = await cmd.output();
     return success;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
