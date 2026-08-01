@@ -1,4 +1,4 @@
-import type { AIProvider, PromptOptions, ProviderResult, ModelInfo } from "./types.ts";
+import type { AIProvider, PromptOptions, ProviderResult } from "./types.ts";
 import type { ClaudeMessage } from "../claude/types.ts";
 
 const SESSION_ID_PATTERN = /session[:\s]+([a-zA-Z0-9_-]+)/i;
@@ -7,7 +7,6 @@ const SESSION_ID_PATTERN = /session[:\s]+([a-zA-Z0-9_-]+)/i;
 // whole after each step, so polling too fast just burns CPU.
 const POLL_INTERVAL_MS = 1500;
 
-// deno-lint-ignore no-explicit-any
 interface AtifStep {
   step_id: number;
   source: string;
@@ -30,7 +29,6 @@ interface AtifStep {
   };
 }
 
-// deno-lint-ignore no-explicit-any
 interface AtifExport {
   session_id?: string;
   agent?: { model_name?: string };
@@ -54,14 +52,6 @@ export class DevinProvider implements AIProvider {
       return await this.runDevin(opts);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-
-      // If Devin rejects the model ID (e.g. a Claude-specific ID like
-      // "claude-opus-4-8" was passed to Devin which expects "claude-opus-4.8"),
-      // retry once without --model so the request still succeeds.
-      if (msg.includes("Unknown model") && opts.modelOptions?.model) {
-        console.warn(`[Devin] Model "${opts.modelOptions.model}" rejected, retrying without --model`);
-        return await this.runDevin({ ...opts, modelOptions: undefined });
-      }
 
       // If the session is locked by another process (e.g. an interactive
       // `devin` session the user opened on the host), resume (-r) will panic.
@@ -92,9 +82,7 @@ export class DevinProvider implements AIProvider {
       args.push("-r", opts.sessionId);
     }
 
-    if (opts.modelOptions?.model) {
-      args.push("--model", opts.modelOptions.model);
-    }
+    // No --model: devin uses whatever model it is configured to default to.
 
     // --export writes an ATIF JSON file that is updated incrementally after
     // each step. We poll it to stream intermediate progress (tool calls,
@@ -230,13 +218,13 @@ export class DevinProvider implements AIProvider {
       // Promise.all resolves normally (streams close on kill). Detect that
       // here rather than relying on the catch path.
       if (opts.controller.signal.aborted) {
-        return { response: "Request was cancelled", sessionId, modelUsed: opts.modelOptions?.model || "Default" };
+        return { response: "Request was cancelled", sessionId, modelUsed: "Default" };
       }
     } catch (error) {
       processExited = true;
       if (opts.controller.signal.aborted || (error as Error).name === "AbortError") {
         try { child.kill("SIGTERM"); } catch { /* already exited */ }
-        return { response: "Request was cancelled", sessionId, modelUsed: opts.modelOptions?.model || "Default" };
+        return { response: "Request was cancelled", sessionId, modelUsed: "Default" };
       }
       throw error;
     }
@@ -245,7 +233,7 @@ export class DevinProvider implements AIProvider {
     // emitted between the last poll and process exit, plus final_metrics.
     let cost: number | undefined;
     let duration: number | undefined;
-    let modelUsed = opts.modelOptions?.model || "Default";
+    let modelUsed = "Default";
     let tokenUsage: { promptTokens?: number; completionTokens?: number; cachedTokens?: number } | undefined;
 
     try {
@@ -386,26 +374,6 @@ export class DevinProvider implements AIProvider {
       opts.onMessage?.(msg);
       opts.onChunk?.(step.message + "\n");
     }
-  }
-
-  // Curated set of common Devin model aliases. Devin supports hundreds of
-  // model variants (run `devin models list` for the full set); these short
-  // aliases always resolve to the latest version in each family and cover
-  // the vast majority of use-cases. Any string Devin accepts on `--model` works,
-  // so users can type a full model ID (e.g. `glm-5-2-max`) even if not listed.
-  static readonly COMMON_MODELS: ModelInfo[] = [
-    { id: "adaptive", name: "Adaptive", description: "Intelligent model router — auto-selects the best model per task (recommended)", contextWindow: 0, recommended: true },
-    { id: "opus", name: "Claude Opus", description: "Most capable Claude — complex refactors, architecture, deep reasoning", contextWindow: 1_000_000 },
-    { id: "sonnet", name: "Claude Sonnet", description: "Balanced speed and capability", contextWindow: 1_000_000 },
-    { id: "gpt", name: "GPT", description: "OpenAI GPT — strong reasoning for multi-file work", contextWindow: 1_000_000 },
-    { id: "swe", name: "SWE", description: "Cognition SWE — fast and cheap for straightforward edits and questions", contextWindow: 1_000_000 },
-    { id: "codex", name: "Codex", description: "OpenAI Codex — code-focused", contextWindow: 1_000_000 },
-    { id: "gemini", name: "Gemini", description: "Google Gemini", contextWindow: 1_000_000 },
-    { id: "glm-5.2", name: "GLM 5.2", description: "GLM open-source model (free tier available)", contextWindow: 200_000 },
-  ];
-
-  async listModels(): Promise<ModelInfo[]> {
-    return DevinProvider.COMMON_MODELS;
   }
 
   async isAvailable(): Promise<boolean> {

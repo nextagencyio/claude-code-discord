@@ -1,10 +1,10 @@
-import type { AIProvider, PromptOptions, ProviderResult, ModelInfo } from "./types.ts";
+import type { AIProvider, PromptOptions, ProviderResult } from "./types.ts";
 import { sendToClaudeCode, cleanSessionId } from "../claude/client.ts";
-import { CLAUDE_MODELS } from "../claude/enhanced-client.ts";
 
 export class ClaudeCodeProvider implements AIProvider {
   name = "claude-code";
   displayName = "Claude Code";
+  aliases = ["claude"];
 
   async sendPrompt(opts: PromptOptions): Promise<ProviderResult> {
     const cleanedSessionId = opts.sessionId ? cleanSessionId(opts.sessionId) : undefined;
@@ -17,7 +17,8 @@ export class ClaudeCodeProvider implements AIProvider {
       opts.onChunk,
       opts.onStreamJson as ((json: unknown) => void) | undefined,
       opts.continueMode,
-      opts.modelOptions,
+      // No model options: the CLI uses whatever model it is configured with.
+      undefined,
       opts.workspaceRootDir,
       opts.mcpServers,
     );
@@ -41,16 +42,5 @@ export class ClaudeCodeProvider implements AIProvider {
     } catch {
       return false;
     }
-  }
-
-  async listModels(): Promise<ModelInfo[]> {
-    return Object.entries(CLAUDE_MODELS).map(([id, model]) => ({
-      id,
-      name: model.name,
-      description: model.description,
-      contextWindow: model.contextWindow,
-      recommended: model.recommended,
-      supportsThinking: model.supportsThinking,
-    }));
   }
 }

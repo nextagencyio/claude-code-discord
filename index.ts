@@ -24,7 +24,7 @@ import { getGitInfo } from "./git/index.ts";
 import { createClaudeSender, expandableContent, type DiscordSender, type ClaudeMessage, convertToClaudeMessages } from "./claude/index.ts";
 import { DEFAULT_SETTINGS, UNIFIED_DEFAULT_SETTINGS } from "./settings/index.ts";
 import { cleanupPaginationStates } from "./discord/index.ts";
-import { createProviderRegistry, getDefaultProviderName, type AIProvider, type ProviderRegistry } from "./providers/index.ts";
+import { createProviderRegistry, getDefaultProviderName, PROVIDER_NAMES, type AIProvider, type ProviderRegistry } from "./providers/index.ts";
 
 // Core modules - now handle most of the heavy lifting
 import {
@@ -78,12 +78,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
     // Falsy after a bot restart (sessions loaded from disk) or a /new, so the
     // next message re-injects the durable progress file as context.
     primed?: boolean;
-    // Per-channel provider name (defaults to the global default provider)
+    // Per-channel provider name (defaults to the global default provider).
+    // The bot picks the CLI, never the model — each CLI runs on whatever
+    // model it is itself configured to use.
     providerName?: string;
-    // Per-channel model override (falls back to the global default model).
-    // Stored per-channel because a Claude model ID is invalid for Devin and
-    // vice-versa, so a single global model would clash across providers.
-    modelName?: string;
   }
   const channelSessions = new Map<string, ChannelSession>();
   let activeChannelId: string | undefined;
@@ -122,14 +120,13 @@ export async function createClaudeCodeBot(config: BotConfig) {
 
   async function saveSessionState(): Promise<void> {
     try {
-      const state: Record<string, { sessionId?: string; channelName?: string; providerName?: string; modelName?: string }> = {};
+      const state: Record<string, { sessionId?: string; channelName?: string; providerName?: string }> = {};
       for (const [channelId, session] of channelSessions) {
         if (session.sessionId) {
           state[channelId] = {
             sessionId: session.sessionId,
             channelName: session.channelName,
             providerName: session.providerName,
-            modelName: session.modelName,
           };
         }
       }
@@ -142,7 +139,9 @@ export async function createClaudeCodeBot(config: BotConfig) {
   async function loadSessionState(): Promise<void> {
     try {
       const content = await Deno.readTextFile(sessionStatePath);
-      const state: Record<string, { sessionId?: string; channelName?: string; providerName?: string; modelName?: string }> = JSON.parse(content);
+      // A `modelName` may still be present in state files written by an older
+      // build; it is read and discarded, and the next save drops it.
+      const state: Record<string, { sessionId?: string; channelName?: string; providerName?: string }> = JSON.parse(content);
       for (const [channelId, saved] of Object.entries(state)) {
         if (saved.sessionId) {
           const folderName = saved.channelName || channelId;
@@ -153,7 +152,6 @@ export async function createClaudeCodeBot(config: BotConfig) {
             channelName: saved.channelName,
             messageQueue: [],
             providerName: saved.providerName,
-            modelName: saved.modelName,
           });
           console.log(`Restored session for channel ${folderName}: ${saved.sessionId}`);
         }
@@ -268,7 +266,6 @@ export async function createClaudeCodeBot(config: BotConfig) {
           bot.updateBotSettings(settings);
         }
       },
-      getChannelModel: () => activeChannelId ? getChannelSession(activeChannelId).modelName : undefined,
     },
     {
       getController: () => activeChannelId ? getChannelSession(activeChannelId).controller : null,
@@ -309,18 +306,12 @@ export async function createClaudeCodeBot(config: BotConfig) {
     setChannelProvider: (name) => { if (activeChannelId) { getChannelSession(activeChannelId).providerName = name; saveSessionState(); } },
     getDefaultProviderName: () => defaultProviderName,
     getAvailableProviderNames: () => {
-      const names: string[] = [];
       // Synchronous check — returns all registered provider names
       // (isAvailable() is async, so we return all and let /provider list handle availability)
-      for (const name of ["claude-code", "devin"]) {
-        if (providerRegistry.hasProvider(name)) names.push(name);
-      }
-      return names;
+      return PROVIDER_NAMES.filter((name) => providerRegistry.hasProvider(name));
     },
-    getChannelModel: () => activeChannelId ? getChannelSession(activeChannelId).modelName : undefined,
-    setChannelModel: (model) => { if (activeChannelId) { getChannelSession(activeChannelId).modelName = model; saveSessionState(); } },
-    getGlobalDefaultModel: () => settingsOps.getSettings().unified.defaultModel,
     getProvider: (name) => providerRegistry.hasProvider(name) ? providerRegistry.getProvider(name) : undefined,
+    resolveProviderName: (name) => providerRegistry.hasProvider(name) ? providerRegistry.getProvider(name).name : undefined,
   });
 
   // Create button handlers (expand/collapse for truncated content)
@@ -587,15 +578,8 @@ export async function createClaudeCodeBot(config: BotConfig) {
               });
             }
           } : undefined,
-          // The unified defaultModel is a Claude Code model ID (e.g.
-          // "claude-opus-4-8") and is not valid for other providers like Devin.
-          // Only apply it for the claude-code provider; other providers use the
-          // per-channel override (session.modelName) or let the provider choose.
-          modelOptions: (() => {
-            const effectiveModel = session.modelName ||
-              (provider.name === "claude-code" ? settingsOps.getSettings().unified.defaultModel : undefined);
-            return effectiveModel ? { model: effectiveModel } : undefined;
-          })(),
+          // No model is passed: each CLI runs on whatever model it is
+          // configured to use. The bot chooses the provider, not the model.
           workspaceRootDir: workDir,
           mcpServers: session.mcpServers,
         });

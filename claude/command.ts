@@ -9,7 +9,6 @@ export interface ClaudeHandlerDeps {
   setClaudeController: (controller: AbortController | null) => void;
   setClaudeSessionId: (sessionId: string | undefined) => void;
   sendClaudeMessages: (messages: ClaudeMessage[]) => Promise<void>;
-  getDefaultModel?: () => string | undefined;
 }
 
 export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
@@ -45,7 +44,6 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         }]
       });
 
-      const defaultModel = deps.getDefaultModel?.();
       let streamMessageCount = 0;
 
       // Serialize Discord sends so messages from successive stream events
@@ -95,7 +93,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           }
         },
         false, // continueMode = false
-        defaultModel ? { model: defaultModel } : undefined,
+        undefined, // no model override — the CLI uses its own configured model
         deps.workspaceRootDir,
         mcpServers
       );
@@ -182,7 +180,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           }]
         });
 
-        return { response: errorMsg, modelUsed: defaultModel || 'Default' };
+        return { response: errorMsg, modelUsed: 'Default' };
       }
     },
     
@@ -217,7 +215,6 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
 
       await ctx.editReply({ embeds: [embedData] });
 
-      const continueDefaultModel = deps.getDefaultModel?.();
       let continueSendChain: Promise<void> = Promise.resolve();
       const result = await sendToClaudeCode(
         currentWorkDir,
@@ -237,7 +234,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           }
         },
         true, // continueMode = true
-        continueDefaultModel ? { model: continueDefaultModel } : undefined,
+        undefined, // no model override — the CLI uses its own configured model
         deps.workspaceRootDir
       );
 

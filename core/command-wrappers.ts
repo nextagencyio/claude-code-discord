@@ -1,6 +1,6 @@
 /**
  * Command handler wrappers for Discord bot commands.
- * Only the 4 active slash commands: /new, /cancel, /model, /status
+ * The active slash commands: /new, /cancel, /status, /browser, /provider
  *
  * @module core/command-wrappers
  */
@@ -55,14 +55,10 @@ export interface CommandWrapperDeps {
   getDefaultProviderName?: () => string;
   /** Get list of available provider names */
   getAvailableProviderNames?: () => string[];
-  /** Get the model override for the active channel */
-  getChannelModel?: () => string | undefined;
-  /** Set the model override for the active channel */
-  setChannelModel?: (model: string | undefined) => void;
-  /** Get the global default model (from unified settings) */
-  getGlobalDefaultModel?: () => string | undefined;
-  /** Look up a provider by name (for listing its models) */
-  getProvider?: (name: string) => { listModels?: () => Promise<{ id: string; name: string; description: string; recommended?: boolean }[]>; isAvailable?: () => Promise<boolean> } | undefined;
+  /** Look up a provider by name (for its availability check) */
+  getProvider?: (name: string) => { isAvailable?: () => Promise<boolean> } | undefined;
+  /** Resolve a provider alias to its canonical name ("claude" → "claude-code") */
+  resolveProviderName?: (name: string) => string | undefined;
 }
 
 // ================================
@@ -129,77 +125,9 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     },
   });
 
-  // /model - Switch or list models for the active channel's provider
-  // Free-text input (no static choices) because model IDs differ across
-  // providers and Discord caps choices at 25. Called with no argument, lists
-  // the models available to the channel's current provider.
-  commandHandlers.set("model", {
-    execute: async (ctx: InteractionContext) => {
-      setChannel(ctx);
-      const providerName = deps.getChannelProvider?.() || deps.getDefaultProviderName?.() || "claude-code";
-      const model = ctx.getString("model"); // optional now
-
-      // No argument → list models for the active provider
-      if (!model) {
-        const provider = deps.getProvider?.(providerName);
-        const models = provider?.listModels ? await provider.listModels() : [];
-        const currentModel = deps.getChannelModel?.() || deps.getGlobalDefaultModel?.() || "default";
-
-        if (models.length === 0) {
-          await ctx.reply({
-            embeds: [{
-              color: 0x0099ff,
-              title: `Models for ${providerName}`,
-              description: "No model list available for this provider.\nUse `/model model:<id>` to set any model ID the provider accepts.",
-              fields: [
-                { name: "Current", value: `\`${currentModel}\``, inline: true },
-              ],
-              timestamp: true,
-            }],
-          });
-          return;
-        }
-
-        const modelList = models.map((m) => {
-          const marker = m.id === currentModel ? "✅ " : (m.recommended ? "⭐ " : "");
-          return `${marker}**${m.name}** (\`${m.id}\`)\n${m.description}`;
-        }).join("\n\n");
-
-        await ctx.reply({
-          embeds: [{
-            color: 0x0099ff,
-            title: `Models for ${providerName}`,
-            description: modelList,
-            fields: [
-              { name: "Current", value: `\`${currentModel}\``, inline: true },
-              { name: "Provider", value: `\`${providerName}\``, inline: true },
-            ],
-            footer: { text: "Use /model model:<id> to switch. Any ID the provider accepts works." },
-            timestamp: true,
-          }],
-        });
-        return;
-      }
-
-      // Set the model for this channel
-      if (deps.setChannelModel) {
-        deps.setChannelModel(model);
-      }
-
-      await ctx.reply({
-        embeds: [{
-          color: 0x00ff00,
-          title: "Model Switched",
-          description: `This channel will now use **\`${model}\`** with the **${providerName}** provider.\nUse \`/new\` to start a fresh session with the new model.`,
-          fields: [
-            { name: "Model", value: `\`${model}\``, inline: true },
-            { name: "Provider", value: `\`${providerName}\``, inline: true },
-          ],
-          timestamp: true,
-        }],
-      });
-    },
-  });
+  // NOTE: there is deliberately no /model command. The bot selects a provider
+  // (which CLI to talk to) and nothing else — each CLI runs on whatever model
+  // it is configured with. Change the model in the CLI's own config.
 
   // /status - Show current channel session info
   commandHandlers.set("status", {
@@ -210,7 +138,6 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
       const isRunning = controller !== null && !controller.signal.aborted;
       const channelWorkDir = deps.getClaudeWorkDir ? deps.getClaudeWorkDir() : "Unknown";
       const providerName = deps.getChannelProvider?.() || deps.getDefaultProviderName?.() || "claude-code";
-      const modelName = deps.getChannelModel?.() || deps.getGlobalDefaultModel?.() || "default";
 
       await ctx.reply({
         embeds: [{
@@ -224,7 +151,6 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
             },
             { name: "Status", value: isRunning ? "Running" : "Idle", inline: true },
             { name: "Provider", value: `\`${providerName}\``, inline: true },
-            { name: "Model", value: `\`${modelName}\``, inline: true },
             {
               name: "Session",
               value: sessionId ? `\`${sessionId.substring(0, 20)}...\`` : "No active session",
@@ -458,7 +384,13 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
         }
 
         case "set": {
-          const name = ctx.getString("name");
+          // Resolve an alias to its canonical name before validating, so
+          // `/provider set name:claude` is accepted as `claude-code` rather
+          // than rejected for not being in the canonical list.
+          // An unresolvable name falls through unchanged so it reports as an
+          // invalid provider rather than as a missing one.
+          const requested = ctx.getString("name");
+          const name = (requested && deps.resolveProviderName?.(requested)) || requested;
           if (!name) {
             await ctx.reply({
               embeds: [{
@@ -492,13 +424,6 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
             deps.setChannelProvider(name);
           }
 
-          // Clear the per-channel model override — model IDs are provider-specific
-          // (e.g. Claude's "claude-opus-4-8" is invalid for Devin which uses
-          // "claude-opus-4.8"). The user should /model to pick a new one.
-          if (deps.setChannelModel) {
-            deps.setChannelModel(undefined);
-          }
-
           if (!isAvailable) {
             await ctx.reply({
               embeds: [{
@@ -515,7 +440,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
             embeds: [{
               color: 0x00ff00,
               title: "Provider Switched",
-              description: `This channel will now use **${name}** as its AI provider.\nThe model override was cleared (model IDs are provider-specific). Use \`/model\` to pick a model, then \`/new\` to start a fresh session.`,
+              description: `This channel will now use **${name}** as its AI provider, on whatever model that CLI is configured to use.\nRun \`/new\` to start a fresh session.`,
               timestamp: true,
             }],
           });

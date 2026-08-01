@@ -167,8 +167,6 @@ export interface HandlerRegistryDeps {
   sendClaudeMessages: (messages: ClaudeMessage[]) => Promise<void>;
   /** Callback when bot settings update */
   onBotSettingsUpdate?: (settings: { mentionEnabled: boolean; mentionUserId: string | null }) => void;
-  /** Per-channel model override (falls back to the global default model) */
-  getChannelModel?: () => string | undefined;
 }
 
 /**
@@ -362,7 +360,6 @@ export function createAllHandlers(
     setClaudeController: claudeSession.setController,
     setClaudeSessionId: claudeSession.setSessionId,
     sendClaudeMessages,
-    getDefaultModel: () => deps.getChannelModel?.() || settings.getSettings().unified.defaultModel,
   });
 
   const gitHandlers = createGitHandlers({
@@ -478,20 +475,12 @@ export function getAllCommands() {
       .setName("cancel")
       .setDescription("Cancel the currently running AI Bot session"),
 
-    new SlashCommandBuilder()
-      .setName("model")
-      .setDescription("Switch or list AI models for this channel's provider")
-      // deno-lint-ignore no-explicit-any
-      .addStringOption((option: any) =>
-        option
-          .setName("model")
-          .setDescription("Model ID to use (omit to list available models). Any ID the provider accepts works.")
-          .setRequired(false)
-      ),
+    // No /model command: the bot picks the provider, and each provider's CLI
+    // picks its own model from its own config.
 
     new SlashCommandBuilder()
       .setName("status")
-      .setDescription("Show current session and model info"),
+      .setDescription("Show current session and provider info"),
 
     new SlashCommandBuilder()
       .setName("browser")

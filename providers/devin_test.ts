@@ -4,11 +4,11 @@
  *
  * Verifies:
  *  - isAvailable() returns true when devin is installed
- *  - listModels() returns the curated set
  *  - sendPrompt streams tool_use/text messages via onMessage
  *  - session ID is extracted from the ATIF export
  *  - duration is parsed and > 0
- *  - modelUsed reflects the actual model (from export, not just the flag)
+ *  - modelUsed reflects whatever model the CLI chose (read from the export;
+ *    the bot never passes --model)
  *  - resume (-r) works with a returned session ID
  */
 import { DevinProvider } from "./devin.ts";
@@ -38,15 +38,8 @@ async function main() {
   console.log(`  devin available: ${available}`);
   assert(available, "Devin CLI is installed and responds to `devin version`");
 
-  // --- Test 2: listModels ---
-  console.log("\nTest 2: listModels()");
-  const models = await provider.listModels();
-  assert(models.length >= 8, `listModels returns >= 8 models (got ${models.length})`);
-  assert(models.some((m) => m.id === "adaptive" && m.recommended), "adaptive model is present and recommended");
-  assert(models.some((m) => m.id === "glm-5.2"), "glm-5.2 (not 'glm') is in the list — verified against real CLI");
-
-  // --- Test 3: sendPrompt with streaming ---
-  console.log("\nTest 3: sendPrompt (first turn, fresh session)");
+  // --- Test 2: sendPrompt with streaming ---
+  console.log("\nTest 2: sendPrompt (first turn, fresh session)");
   const messages: ClaudeMessage[] = [];
   const chunks: string[] = [];
   const controller = new AbortController();
@@ -70,7 +63,6 @@ async function main() {
     onChunk: (chunk) => {
       chunks.push(chunk);
     },
-    modelOptions: { model: "glm-5.2" }, // free tier to avoid quota issues
   });
 
   console.log("\n  --- Result ---");
@@ -83,15 +75,15 @@ async function main() {
   console.log(`  chunks received: ${chunks.length}`);
 
   assert(!!result.sessionId, "session ID extracted from ATIF export");
-  assert(result.modelUsed === "GLM-5.2" || result.modelUsed === "glm-5.2", `modelUsed reflects actual model from export (got "${result.modelUsed}")`);
+  assert(!!result.modelUsed && result.modelUsed !== "Default", `modelUsed is read back from the export (got "${result.modelUsed}")`);
   assert(result.duration !== undefined && result.duration > 0, `duration parsed and > 0 (got ${result.duration}ms)`);
   assert(messages.length > 0, "at least one message streamed via onMessage");
   assert(messages.some((m) => m.type === "tool_use"), "at least one tool_use message was streamed");
   assert(result.response.length > 0, "response text is non-empty");
 
-  // --- Test 4: resume with the session ID ---
+  // --- Test 3: resume with the session ID ---
   if (result.sessionId) {
-    console.log(`\nTest 4: sendPrompt (resume with sessionId=${result.sessionId})`);
+    console.log(`\nTest 3: sendPrompt (resume with sessionId=${result.sessionId})`);
     const resumeMessages: ClaudeMessage[] = [];
     const resumeController = new AbortController();
     const resumePrompt = "What was the exact text I asked you to put in the file? Reply with just that text, nothing else.";
@@ -109,7 +101,6 @@ async function main() {
         const preview = msg.content.substring(0, 80).replace(/\n/g, " ");
         console.log(`  [msg] type=${msg.type}${msg.metadata?.name ? ` tool=${msg.metadata.name}` : ""} content="${preview}${msg.content.length > 80 ? "..." : ""}"`);
       },
-      modelOptions: { model: "glm-5.2" },
     });
 
     console.log("\n  --- Resume Result ---");
@@ -127,8 +118,8 @@ async function main() {
     );
   }
 
-  // --- Test 5: cancellation ---
-  console.log("\nTest 5: cancellation (abort mid-run)");
+  // --- Test 4: cancellation ---
+  console.log("\nTest 4: cancellation (abort mid-run)");
   const cancelController = new AbortController();
   const cancelMessages: ClaudeMessage[] = [];
   const cancelPrompt = "Write a detailed 1000-word essay about the history of computing.";
@@ -145,7 +136,6 @@ async function main() {
       prompt: cancelPrompt,
       controller: cancelController,
       onMessage: (msg) => cancelMessages.push(msg),
-      modelOptions: { model: "glm-5.2" },
     });
     assert(cancelResult.response === "Request was cancelled", "cancellation returns 'Request was cancelled' response");
   } catch (error) {

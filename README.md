@@ -27,8 +27,7 @@ A Discord bot that gives you a conversational interface to AI coding agents like
 |---------|-------------|
 | `/new` | Clear session and start fresh in the current channel |
 | `/cancel` | Cancel the currently running AI session |
-| `/model` | Switch or list AI models for this channel's provider (free-text, per-channel) |
-| `/status` | Show current session info, provider, model, working directory, and run state |
+| `/status` | Show current session info, provider, working directory, and run state |
 | `/browser` | Manage Chrome CDP connection for authenticated browser control |
 | `/provider` | Switch or check the AI provider for this channel (checks CLI availability) |
 
@@ -188,8 +187,10 @@ The bot supports multiple AI CLI backends:
 
 Use `/provider set name:devin` to switch a channel to Devin, or `/provider list` to see available providers (with CLI availability checks). The default provider is set via `DEFAULT_PROVIDER` in `.env`.
 
-### Per-Channel Model Selection
-Each channel stores its own model override via `/model model:<id>`. Run `/model` with no argument to list the curated models for the channel's active provider. Model IDs are provider-specific (a Claude ID won't work for Devin and vice-versa), so the model is stored per-channel. Any model ID the provider accepts works — for Devin, run `devin models list` to see all 35+ families.
+### No Model Selection — By Design
+The bot picks the **provider** and nothing else. Every provider runs its CLI with no model flag, so each one uses whatever model it is already configured with. To change the model, change it in that CLI's own configuration (`claude` settings, `~/.codex/config.toml`, the opencode/agy/devin configs) — not from Discord.
+
+Supported providers: `claude-code` (alias `claude`), `devin`, `agy`, `opencode`, `codex`. Override a binary's location with `CLAUDE_PATH`, `DEVIN_PATH`, `AGY_PATH`, `OPENCODE_PATH`, or `CODEX_PATH`.
 
 ### Rate Limit Fallback
 If the primary model hits a rate limit, the bot automatically retries with Claude Sonnet 4 (Claude Code provider only).

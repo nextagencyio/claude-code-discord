@@ -257,17 +257,20 @@ export const COMMAND_HELP = {
     usage: "/provider action: [list|set|status] name: [provider name]",
     examples: [
       "/provider action: list",
-      "/provider action: set name: devin",
+      "/provider action: set name: claude",
+      "/provider action: set name: codex",
       "/provider action: status"
     ],
     parameters: [
       { name: "action", description: "Action to perform (list, set, status)", required: true },
-      { name: "name", description: "Provider name (for 'set' action)", required: false }
+      { name: "name", description: "Provider name: claude-code (alias claude), devin, agy, opencode, codex", required: false }
     ],
     notes: [
-      "list: Show all available AI providers",
+      "list: Show all available AI providers, and whether their CLI is installed",
       "set: Switch this channel to use a different provider",
       "status: Show the current provider for this channel",
+      "There is no model command — each CLI runs on whatever model it is configured with",
+      "To change the model, change it in that CLI's own config (claude settings, ~/.codex/config.toml, etc.)",
       "Use /new after switching providers to start a fresh session"
     ]
   },
@@ -787,45 +790,6 @@ export const COMMAND_HELP = {
       "Customize display preferences for better readability"
     ]
   },
-  "quick-model": {
-    title: "🚀 Quick Model Switch",
-    description: "Quickly switch AI model for your next conversation",
-    usage: "/quick-model model: [model-id]",
-    examples: [
-      "/quick-model model: claude-sonnet-4",
-      "/quick-model model: claude-sonnet-4-20250514?thinking_mode=true",
-      "/quick-model model: claude-3-5-sonnet-20241022"
-    ],
-    parameters: [
-      { name: "model", description: "AI model to use", required: true }
-    ],
-    notes: [
-      "Instantly switches to selected model",
-      "Shows model capabilities and features",
-      "Applies to all new conversations until changed again"
-    ]
-  },
-  model: {
-    title: "🤖 Model Selection",
-    description: "Switch or list AI models for this channel's active provider",
-    usage: "/model model: [model-id]  (or just /model to list available models)",
-    examples: [
-      "/model",
-      "/model model: opus",
-      "/model model: sonnet",
-      "/model model: glm-5-2-max"
-    ],
-    parameters: [
-      { name: "model", description: "Model ID to use (omit to list available models). Any ID the provider accepts works.", required: false }
-    ],
-    notes: [
-      "With no argument, lists the models available to this channel's provider",
-      "Model IDs are provider-specific — a Claude ID won't work for Devin and vice-versa",
-      "The model is stored per-channel and persists across bot restarts",
-      "Use /provider to switch the channel's provider first, then /model to pick a model",
-      "Use /new after switching models to start a fresh session"
-    ]
-  }
 };
 
 export function createHelpHandlers(deps: HelpHandlerDeps) {
@@ -923,7 +887,7 @@ export function createHelpHandlers(deps: HelpHandlerDeps) {
               },
               {
                 name: "⚙️ Advanced Settings",
-                value: "`/settings` - Unified bot settings (NEW)\n`/claude-settings` - AI preferences\n`/output-settings` - Display settings\n`/quick-model` - Switch AI model",
+                value: "`/settings` - Unified bot settings (NEW)\n`/claude-settings` - AI preferences\n`/output-settings` - Display settings\n`/provider` - Switch AI provider",
                 inline: false
               },
               {
