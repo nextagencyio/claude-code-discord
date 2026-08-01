@@ -121,6 +121,18 @@ export class DevinProvider implements AIProvider {
     const stdoutChunks: string[] = [];
     let sessionId: string | undefined;
     let lastSeenStepId = 0;
+    // On a resumed session (-r), the ATIF export contains ALL steps from
+    // the session's beginning, not just new ones from this run. Without a
+    // baseline, lastSeenStepId=0 re-emits every old step as a new Discord
+    // message — the bot spams the channel with the entire conversation
+    // history on every message. Fix: on the first successful poll, record
+    // the highest existing step_id as the baseline and skip everything at
+    // or below it. Only steps emitted AFTER this run started are sent.
+    // Fallback: if the poll loop never ran, use startTime to filter by
+    // step timestamp in the final flush.
+    const isResume = !!opts.sessionId;
+    let baselineStepId = 0;
+    let baselineSet = false;
     let processExited = false;
 
     // Read stderr
@@ -176,6 +188,26 @@ export class DevinProvider implements AIProvider {
         }
 
         const steps = exportData.steps || [];
+
+        // On a resumed session, the first poll sees all pre-existing steps.
+        // Set the baseline so we skip them (only emit steps from THIS run).
+        // Use step timestamps to distinguish old from new: steps with
+        // timestamps before this process started are from prior turns.
+        // Fall back to step_id ordering only if timestamps are missing.
+        if (isResume && !baselineSet && steps.length > 0) {
+          const startMs = startTime;
+          const oldSteps = steps.filter((s) => {
+            if (!s.timestamp) return false; // no timestamp — treat as new
+            return new Date(s.timestamp).getTime() < startMs;
+          });
+          if (oldSteps.length > 0) {
+            baselineStepId = Math.max(...oldSteps.map((s) => s.step_id));
+            lastSeenStepId = baselineStepId;
+            console.log(`[Devin] Resume baseline: skipping ${oldSteps.length} pre-existing steps (max old step_id=${baselineStepId})`);
+          }
+          baselineSet = true;
+        }
+
         for (const step of steps) {
           if (step.step_id <= lastSeenStepId) continue;
           lastSeenStepId = step.step_id;
@@ -225,6 +257,22 @@ export class DevinProvider implements AIProvider {
 
       // Emit any steps we haven't seen yet
       const steps = exportData.steps || [];
+
+      // If the poll loop never set the baseline (process exited before
+      // first poll), set it now from the final export so we don't replay
+      // old steps in the final flush either. Same timestamp-based logic.
+      if (isResume && !baselineSet && steps.length > 0) {
+        const startMs = startTime;
+        const oldSteps = steps.filter((s) => {
+          if (!s.timestamp) return false;
+          return new Date(s.timestamp).getTime() < startMs;
+        });
+        if (oldSteps.length > 0) {
+          lastSeenStepId = Math.max(...oldSteps.map((s) => s.step_id));
+        }
+        baselineSet = true;
+      }
+
       for (const step of steps) {
         if (step.step_id <= lastSeenStepId) continue;
         lastSeenStepId = step.step_id;
