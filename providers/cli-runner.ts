@@ -48,6 +48,12 @@ export async function runCli(opts: RunCliOptions): Promise<RunCliResult> {
     cwd: opts.cwd,
     stdout: "piped",
     stderr: "piped",
+    // Close stdin. `codex exec` reads stdin even when the prompt is passed as
+    // an argument ("Reading additional input from stdin..."), and Deno's
+    // default of "inherit" hands it the bot's own stdin — which under some
+    // launch contexts is an open pipe that never closes, so codex blocks
+    // forever and the channel just hangs. None of these CLIs take piped input.
+    stdin: "null",
     signal: opts.controller.signal,
   });
 
