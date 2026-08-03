@@ -106,6 +106,39 @@ export function convertMessageContent(content: MessageContent): any {
 }
 
 // ================================
+// Daily Assistant inbox forwarder
+// ================================
+// When DAILY_ASSISTANT_INBOX_URL and DAILY_ASSISTANT_INBOX_SECRET are set,
+// every human message in the bot's category is fire-and-forget POSTed to
+// the daily-assistant inbox receiver so it can include Discord activity
+// in the daily digest. This is opt-in and silently skips if not configured.
+
+const _inboxUrl = Deno.env.get("DAILY_ASSISTANT_INBOX_URL") || "";
+const _inboxSecret = Deno.env.get("DAILY_ASSISTANT_INBOX_SECRET") || "";
+
+function forwardToDailyAssistant(message: Message): void {
+  if (!_inboxUrl || !_inboxSecret) return;
+  const body = JSON.stringify({
+    id: message.id,
+    guild_id: message.guildId || "",
+    channel_id: message.channelId,
+    channel_name: (message.channel as TextChannel)?.name || "",
+    user_id: message.author?.id || "",
+    username: message.author?.globalName || message.author?.username || "",
+    content: message.content || "",
+    timestamp: new Date(message.createdTimestamp || Date.now()).toISOString(),
+    mention_everyone: message.mentions?.everyone || false,
+  });
+  fetch(_inboxUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${_inboxSecret}` },
+    body,
+  }).catch((err) => {
+    console.warn(`[DailyAssistant] Failed to forward message: ${err instanceof Error ? err.message : String(err)}`);
+  });
+}
+
+// ================================
 // Main Bot Creation Function
 // ================================
 
@@ -558,6 +591,9 @@ export async function createDiscordBot(
 
     // Set active channel for output routing
     activeChannel = message.channel as TextChannel;
+
+    // Fire-and-forget: forward to daily-assistant inbox if configured
+    forwardToDailyAssistant(message);
 
     if (onMessage) {
       const ctx = createMessageContext(message);
