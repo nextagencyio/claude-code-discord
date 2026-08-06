@@ -10,7 +10,7 @@ A Discord bot that gives you a conversational interface to AI coding agents like
 
 ## How It Works
 
-- Each Discord channel under the bot's category is an **independent AI session** with its own working directory
+- Each Discord channel under the bot's category is an **independent AI session** with its own working directory — a **notes folder**, not a project checkout (see [Channel folders](#channel-folders-are-notes-not-projects))
 - Just **type a message** — no slash commands needed for normal interaction
 - Sessions **persist across bot restarts** (session IDs saved to disk)
 - **Image attachments** are automatically downloaded, resized, and passed to the AI
@@ -152,12 +152,38 @@ DEVIN_PATH=/path/to/devin             # Path to Devin CLI (default: devin)
 
 Each channel under the category gets its own subfolder: `WORK_DIR/channel-name/` (defaults to `workspace/channel-name/`)
 
+## Channel folders are notes, not projects
+
+**A channel is a Claude session, and its folder is that session's scratchpad —
+markdown notes, pasted context, screenshots.** The code the session works on
+lives wherever it normally lives on disk; the session `cd`s to it. A typical
+channel folder holds little more than a `PROGRESS.md`.
+
+This is worth stating because the obvious reading is the other one. Early on
+these folders held whole project checkouts, one per channel, and that turned
+out to be the wrong shape: a project belongs to itself, not to the chat channel
+that happened to discuss it, and two channels that touch the same repo should
+not be two copies of it.
+
+So the convention is:
+
+```
+workspace/
+  <channel-name>/
+    PROGRESS.md        ← what this session is doing, decided, and next
+    notes.md           ← whatever else the session needs to remember
+    image-*.png        ← attachments the bot downloaded
+```
+
+`PROGRESS.md` is the one that matters — the bot may be restarted at any time,
+and that file is how the next session picks the thread up.
+
 ## Features
 
 ### Per-Channel Sessions
 Each channel operates independently with its own:
 - AI session (persisted to `.claude-sessions.json`)
-- Working directory (`WORK_DIR/channel-name/`)
+- Working directory (`WORK_DIR/channel-name/`) — notes, not a checkout
 - Message queue
 - Provider selection (Claude Code or Devin)
 

@@ -42,7 +42,7 @@ core/button-handlers.ts    — Expand/collapse buttons for truncated embed conte
 
 ## Key Concepts
 
-- **Per-channel sessions:** Each Discord channel under the bot's category maps to its own AI session and working directory (`WORK_DIR/channel-name/`).
+- **Per-channel sessions:** Each Discord channel under the bot's category maps to its own AI session and working directory (`WORK_DIR/channel-name/`). **That folder holds the session's NOTES, not a project** — see "Channel folders" below.
 - **Provider selection:** Each channel picks one of five AI CLIs — `claude-code` (alias `claude`), `devin`, `agy`, `opencode`, `codex`. Set via `/provider set name:...` or the `DEFAULT_PROVIDER` env var. `/provider list` checks which CLIs are actually installed. Binaries are resolved from `CLAUDE_PATH` / `DEVIN_PATH` / `AGY_PATH` / `OPENCODE_PATH` / `CODEX_PATH`, defaulting to the bare command name.
 - **NO model selection — this is deliberate.** The bot chooses *which CLI* to talk to and nothing else; every provider invokes its CLI with no model flag, so each runs on whatever model that CLI is configured with. Change the model in the CLI's own config (`claude` settings, `~/.codex/config.toml`, opencode/agy/devin config), not from Discord. There is no `/model` command and no per-channel model state. Two internal exceptions remain, both unrelated to the channel's conversation model: the image-description helper in `index.ts` pins `claude-haiku-4-5` (a cheap vision call), and `claude/client.ts` retries with Sonnet 4 on a rate limit.
 - **Session persistence:** Session IDs and provider name are saved to `WORK_DIR/.claude-sessions.json` so they survive bot restarts. Every provider returns a resumable session ID (claude: `--resume`, devin: `-r`, agy: `--conversation`, opencode: `--session`, codex: `exec resume`).
@@ -50,6 +50,58 @@ core/button-handlers.ts    — Expand/collapse buttons for truncated embed conte
 - **Image support:** Discord image attachments are downloaded, resized (max 1500px via `sips` on macOS / `convert` on Linux), and referenced in the prompt.
 - **Streaming output:** AI responses stream to Discord as green assistant-text embeds. Tool invocations, tool results, thinking blocks, and most system messages are deliberately dropped in `claude/discord-sender.ts` — the channel carries conversation, not mechanics. The only tool that still renders is a `Read` of an image file, which attaches the image itself.
 - **Rate limit fallback:** If the primary model hits a rate limit, the bot retries with Claude Sonnet 4 (Claude Code provider only).
+
+## Channel folders: session notes, not projects
+
+**A channel is a Claude session. Its folder in `workspace/` is that session's
+scratchpad — `.md` notes and the odd screenshot. Nothing else.**
+
+The code you are asked about almost always lives somewhere else on disk. The
+channel folder is where the session keeps `PROGRESS.md`, research notes,
+pasted context and images; you `cd` to the real repo to do the work.
+
+This is a DEPARTURE from how it used to work. Channel folders used to hold the
+actual project — a whole checkout inside `workspace/<channel>/` — and two
+still do:
+
+- **`workspace/rfpbids/`** is the real rfpbids repo (and `~/nodejs/rfpbids` is
+  a symlink INTO it, not the other way round). Jay knows; it moves out later.
+  **Do not "fix" this mid-task** — active work runs from that path, including
+  systemd units that hardcode it.
+- **`workspace/trading-bot/`** is an old-style project folder, same story.
+
+Everything else already follows the new shape: a folder of notes
+(`assistant/`, `crawler/`, `unlikely-collaborators/`). New channels get the new
+shape — create a `PROGRESS.md` there and leave the code where it lives.
+
+`workspace/rfpbids-cron/` is neither: it holds cron wrapper scripts that `cd`
+into the rfpbids repo. Not a channel.
+
+## Where the work usually lives (check here first)
+
+**Most new channels are about `~/nodejs/rfpbids` — "bowerbid".** Before asking
+Jay what a request refers to, look there. It's the RFP discovery pipeline + the
+bowerbid.com tracker + 40-odd proposal workspaces, and it has its own detailed
+`CLAUDE.md` at the repo root plus one in `web/`. Read those, not this file, for
+anything about bids, proposals, pilots, the tracker, or the pipeline.
+
+Rough routing for a request in a fresh channel:
+
+| The ask sounds like | Start in |
+| --- | --- |
+| A specific bid, client, or proposal (often the channel's own name) | `~/nodejs/rfpbids/proposals/<slug>-<year>/` |
+| RFP discovery, the tracker, deadlines, bidders, `/bower` | `~/nodejs/rfpbids/` + `web/` |
+| A pilot site's code | the per-engagement worktree, not the starter clone — see the rfpbids CLAUDE.md |
+| The Discord bot itself (providers, embeds, slash commands) | here, `~/nodejs/claude-code-discord/` |
+
+**Channels are often named after a proposal.** A channel called
+`unlikely-collaborators` means `proposals/unlikely-collaborators-2026/`. Check
+for a matching workspace directory before assuming the request is abstract.
+
+Why this note lives in THIS file: Claude Code loads `CLAUDE.md` from the
+working directory and every parent, and every channel folder is a child of
+this repo — so a session running in `workspace/<channel>/` inherits this file
+automatically. It is the one place a hint reaches every channel.
 
 ## Dependencies
 
