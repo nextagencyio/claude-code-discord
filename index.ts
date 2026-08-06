@@ -24,6 +24,7 @@ import { getGitInfo } from "./git/index.ts";
 import { createClaudeSender, expandableContent, type DiscordSender, type ClaudeMessage, convertToClaudeMessages } from "./claude/index.ts";
 import { DEFAULT_SETTINGS, UNIFIED_DEFAULT_SETTINGS } from "./settings/index.ts";
 import { cleanupPaginationStates } from "./discord/index.ts";
+import { ensureChannelNotes } from "./core/channel-notes.ts";
 import { createProviderRegistry, getDefaultProviderName, PROVIDER_NAMES, type AIProvider, type ProviderRegistry } from "./providers/index.ts";
 
 // Core modules - now handle most of the heavy lifting
@@ -335,12 +336,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
 
     const session = getChannelSession(channelId, channelName);
 
-    // Ensure the channel's folder exists
-    try {
-      await Deno.mkdir(session.channelWorkDir, { recursive: true });
-    } catch {
-      // Already exists, ignore
-    }
+    // Ensure the channel's folder exists, and seed its PROGRESS.md the first
+    // time — the folder is a notes scratchpad, so give it the shape rather
+    // than relying on each session to remember. Never overwrites.
+    await ensureChannelNotes(session.channelWorkDir, channelName);
 
     // Build prompt with image attachments (resized to max 1500px)
     let prompt = messageContent;

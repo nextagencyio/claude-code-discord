@@ -176,7 +176,9 @@ workspace/
 ```
 
 `PROGRESS.md` is the one that matters — the bot may be restarted at any time,
-and that file is how the next session picks the thread up.
+and that file is how the next session picks the thread up. The bot **seeds a
+starter one** on a channel's first message so the shape exists before anyone
+has to remember it; it never overwrites a `PROGRESS.md` that's already there.
 
 ## Features
 

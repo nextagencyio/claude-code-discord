@@ -72,7 +72,10 @@ still do:
 
 Everything else already follows the new shape: a folder of notes
 (`assistant/`, `crawler/`, `unlikely-collaborators/`). New channels get the new
-shape — create a `PROGRESS.md` there and leave the code where it lives.
+shape automatically — `core/channel-notes.ts` seeds a starter `PROGRESS.md`
+on a channel's first message (never overwriting an existing one), so the file
+is there to fill in rather than something each session has to remember to
+create. Fill it in and leave the code where it lives.
 
 `workspace/rfpbids-cron/` is neither: it holds cron wrapper scripts that `cd`
 into the rfpbids repo. Not a channel.
